@@ -10,25 +10,28 @@
     scrollbar-width: none;  /* Firefox */
 }
 
-/* --- LUXURY SCROLLBAR --- */
+/* --- LUXURY SCROLLBAR (Updated to be slim and rounded) --- */
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-    background: #f1f5f9; /* slate-100 */
-    border-radius: 4px;
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
     background: #cbd5e1; /* slate-300 */
-    border-radius: 4px;
-    border: 2px solid #f1f5f9; /* Creates a padding effect */
+    border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8; /* slate-400 */
+    background: #818cf8; /* indigo-400 */
+}
+
+/* Chrome/Edge specific hack to make corner transparent */
+::-webkit-scrollbar-corner {
+    background: transparent;
 }
 
 input[type=number]::-webkit-inner-spin-button, 

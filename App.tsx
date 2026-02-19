@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, Trash2, FileJson, Table, Save, Plus, X, Calendar, Type, TrendingUp, TrendingDown, CheckCircle2, Upload, RefreshCw, Github, FolderOpen } from 'lucide-react';
+import { LayoutDashboard, Trash2, FileJson, Table, Save, Plus, X, Calendar, Type, TrendingUp, TrendingDown, CheckCircle2, Upload, RefreshCw, Github, FolderOpen, Filter, XCircle } from 'lucide-react';
 import { Transaction, CalculatedTransaction } from './types';
 import { formatCurrency, parseCurrency, parseDateValue, formatDateToDisplay } from './utils/formatters';
 import { exportToExcel, importFromExcel } from './utils/excel';
@@ -21,6 +21,10 @@ function App() {
   const [remoteVersion, setRemoteVersion] = useState('');
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   
+  // Filter State
+  const [dateFilter, setDateFilter] = useState({ start: '', end: '' });
+  const [isFilterVisible, setIsFilterVisible] = useState(false);
+
   // New Transaction Form State
   const [newTrans, setNewTrans] = useState({
     date: '', // YYYY-MM-DD from input type="date"
@@ -89,7 +93,7 @@ function App() {
     }
   }, [transactions, loading]);
 
-  // Calculations
+  // Calculations (Global - Runs on ALL data to ensure running balance is correct)
   const calculatedData = useMemo(() => {
     let runningEstBalance = 0;
     let runningActBalance = 0;
@@ -123,7 +127,30 @@ function App() {
     });
   }, [transactions]);
 
-  // Totals
+  // Filter Logic (Runs on calculatedData)
+  const filteredData = useMemo(() => {
+    if (!dateFilter.start && !dateFilter.end) return calculatedData;
+
+    return calculatedData.filter(item => {
+        const itemDateVal = parseDateValue(item.date);
+        let isValid = true;
+
+        if (dateFilter.start) {
+            const startVal = new Date(dateFilter.start).getTime();
+            // Compare timestamps (ignoring time if possible, but parseDateValue returns time)
+            if (itemDateVal < startVal) isValid = false;
+        }
+
+        if (dateFilter.end) {
+            const endVal = new Date(dateFilter.end).getTime();
+            if (itemDateVal > endVal) isValid = false;
+        }
+
+        return isValid;
+    });
+  }, [calculatedData, dateFilter]);
+
+  // Totals (Always based on GLOBAL calculated data, not filtered)
   const totals = useMemo(() => {
     const finalEstBalance = calculatedData.length > 0 ? calculatedData[calculatedData.length - 1].estBalance : 0;
     const finalActBalance = calculatedData.length > 0 ? calculatedData[calculatedData.length - 1].actBalance : 0;
@@ -240,7 +267,8 @@ function App() {
   };
 
   const handleExcelExport = () => {
-    exportToExcel(calculatedData);
+    // Export filtered data if filter is active, otherwise all
+    exportToExcel(filteredData);
   };
 
   const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -260,50 +288,81 @@ function App() {
     e.target.value = '';
   };
 
+  const clearFilter = () => {
+      setDateFilter({ start: '', end: '' });
+      setIsFilterVisible(false);
+  };
+
   if (loading) return <div className="flex items-center justify-center h-screen bg-slate-50">Loading...</div>;
 
   return (
     <>
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 z-20 shadow-sm shrink-0">
+      <header className="bg-white border-b border-slate-200 z-20 shadow-sm shrink-0 transition-all duration-300">
         <div className="w-full px-4 sm:px-6 lg:px-8 py-3">
-            <div className="flex justify-between items-center">
-                <div className="flex items-center space-x-3">
-                    <div className="bg-indigo-600 p-1.5 rounded-lg shadow-lg shadow-indigo-200">
-                        <LayoutDashboard className="text-white w-5 h-5" />
+            <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4">
+                {/* Logo & Title */}
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                        <div className="bg-indigo-600 p-1.5 rounded-lg shadow-lg shadow-indigo-200">
+                            <LayoutDashboard className="text-white w-5 h-5" />
+                        </div>
+                        <div>
+                            <h1 className="text-lg font-bold text-slate-900 font-serif tracking-tight">OhMonsea Finance Plan</h1>
+                            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold flex items-center gap-2">
+                                Perencanaan Arus Kas v{appVersion}
+                            </p>
+                        </div>
                     </div>
-                    <div>
-                        <h1 className="text-lg font-bold text-slate-900 font-serif tracking-tight">OhMonsea Finance Plan</h1>
-                        <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold flex items-center gap-2">
-                            Perencanaan Arus Kas v{appVersion}
-                        </p>
-                    </div>
+                    
+                    {/* Mobile Toggle Filter */}
+                    <button 
+                        onClick={() => setIsFilterVisible(!isFilterVisible)}
+                        className={`xl:hidden p-2 rounded-md ${isFilterVisible || (dateFilter.start || dateFilter.end) ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500'}`}
+                    >
+                        <Filter className="w-5 h-5" />
+                    </button>
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex flex-col-reverse md:flex-row items-start md:items-center gap-4">
                     
-                    {/* UPDATE BUTTON (Only shows if updateAvailable is true) */}
-                    {updateAvailable && (
-                        <button 
-                            onClick={() => setIsUpdateModalOpen(true)}
-                            className="flex items-center px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-full shadow-md shadow-blue-200 animate-pulse transition-all"
-                        >
-                            <RefreshCw className="w-4 h-4 mr-1.5 animate-spin-slow" />
-                            <span>Update Tersedia!</span>
-                        </button>
-                    )}
+                    {/* DATE FILTER SECTION */}
+                    <div className={`${isFilterVisible || (dateFilter.start || dateFilter.end) ? 'flex' : 'hidden'} xl:flex flex-col md:flex-row items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200 transition-all`}>
+                         <div className="flex items-center gap-2">
+                            <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                </span>
+                                <input 
+                                    type="date" 
+                                    value={dateFilter.start}
+                                    onChange={(e) => setDateFilter(prev => ({...prev, start: e.target.value}))}
+                                    className="pl-7 pr-2 py-1.5 text-[11px] font-medium border border-slate-200 rounded-md bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none w-28 text-slate-600"
+                                    placeholder="Start"
+                                />
+                            </div>
+                            <span className="text-slate-400 text-[10px] font-bold">-</span>
+                            <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                </span>
+                                <input 
+                                    type="date" 
+                                    value={dateFilter.end}
+                                    onChange={(e) => setDateFilter(prev => ({...prev, end: e.target.value}))}
+                                    className="pl-7 pr-2 py-1.5 text-[11px] font-medium border border-slate-200 rounded-md bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none w-28 text-slate-600"
+                                />
+                            </div>
+                         </div>
+                         {(dateFilter.start || dateFilter.end) && (
+                             <button onClick={clearFilter} className="p-1 hover:bg-slate-200 rounded-full text-slate-400 hover:text-rose-500 transition-colors" title="Reset Filter">
+                                 <XCircle className="w-4 h-4" />
+                             </button>
+                         )}
+                    </div>
 
-                    {/* Add Button */}
-                    <button 
-                        onClick={() => setIsModalOpen(true)}
-                        className="flex items-center px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-full shadow-md shadow-indigo-200 transition-all hover:scale-105 active:scale-95"
-                    >
-                        <Plus className="w-4 h-4 mr-1.5" />
-                        <span>Tambah Transaksi</span>
-                    </button>
-
-                    {/* Stats Widget (Updated: Shows Est & Act Balance) */}
-                    <div className="hidden 2xl:flex items-center space-x-6 text-xs mr-4 border-l border-slate-200 pl-6">
+                    {/* Stats Widget */}
+                    <div className="hidden 2xl:flex items-center space-x-6 text-xs border-l border-slate-200 pl-6 h-8">
                         <div className="flex flex-col items-end">
                             <span className="text-slate-400 text-[10px] font-medium uppercase">Estimasi Saldo</span>
                             <span className="font-bold text-indigo-600 text-sm">{formatCurrency(totals.finalEstBalance)}</span>
@@ -316,38 +375,45 @@ function App() {
                         </div>
                     </div>
 
-                    {/* Actions */}
-                    <div className="flex items-center space-x-2">
+                    {/* Actions Toolbar */}
+                    <div className="flex items-center gap-2 self-end md:self-auto">
+                        
+                        {/* Add Button */}
+                        <button 
+                            onClick={() => setIsModalOpen(true)}
+                            className="flex items-center px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-full shadow-md shadow-indigo-200 transition-all hover:scale-105 active:scale-95"
+                        >
+                            <Plus className="w-4 h-4 mr-1.5" />
+                            <span className="hidden sm:inline">Tambah</span>
+                            <span className="sm:hidden">Add</span>
+                        </button>
+
+                        <div className="w-px h-6 bg-slate-200 mx-1"></div>
+
                         <input type="file" ref={fileExcelRef} accept=".xlsx, .xls" className="hidden" onChange={handleExcelImport} />
                         <input type="file" ref={fileJsonRef} accept=".json" className="hidden" onChange={handleJsonImport} />
 
-                        {/* Import JSON Button (New) */}
+                        {/* Import JSON Button */}
                         <button 
                             onClick={() => fileJsonRef.current?.click()}
-                            className="flex items-center px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors shadow-sm"
-                            title="Buka file JSON dari komputer"
+                            className="p-2 text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors shadow-sm"
+                            title="Import JSON"
                         >
-                            <Upload className="w-3.5 h-3.5 sm:mr-1.5 text-slate-500" />
-                            <span className="hidden sm:inline">Buka JSON</span>
+                            <Upload className="w-3.5 h-3.5" />
                         </button>
 
-                        {/* Save / Export JSON */}
+                        {/* Save JSON */}
                         <button 
                             onClick={handleJsonExport} 
-                            className="flex items-center px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors shadow-sm"
-                            title="Simpan file JSON ke komputer"
+                            className="p-2 text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors shadow-sm"
+                            title="Export JSON"
                         >
-                            <Save className="w-3.5 h-3.5 sm:mr-1.5 text-slate-500" />
-                            <span className="hidden sm:inline">Simpan</span>
+                            <Save className="w-3.5 h-3.5" />
                         </button>
-
-                        <button onClick={handleReset} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md transition-colors" title="Hapus Semua Data">
-                            <Trash2 className="w-4 h-4" />
-                        </button>
-
+                        
                         {/* Excel Dropdown */}
                         <div className="relative group">
-                            <button className="flex items-center px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-md shadow-sm shadow-emerald-200 transition-colors">
+                            <button className="flex items-center px-3 py-2 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-md shadow-sm shadow-emerald-200 transition-colors">
                                 <Table className="w-3.5 h-3.5 sm:mr-1.5" />
                                 <span className="hidden sm:inline">Excel</span>
                             </button>
@@ -356,6 +422,10 @@ function App() {
                                 <button onClick={handleExcelExport} className="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-slate-700">Export Excel</button>
                             </div>
                         </div>
+
+                         <button onClick={handleReset} className="p-2 text-rose-600 hover:bg-rose-50 rounded-md transition-colors ml-1" title="Hapus Semua Data">
+                            <Trash2 className="w-4 h-4" />
+                        </button>
                     </div>
                 </div>
             </div>
@@ -365,7 +435,7 @@ function App() {
       {/* Main Table */}
       <main className="flex-1 overflow-hidden w-full px-2 sm:px-4 lg:px-6 py-4 flex flex-col relative">
         <div className="bg-white rounded-lg shadow-xl shadow-slate-200/50 border border-slate-200 flex flex-col h-full relative z-0">
-            <div className="flex-1 overflow-y-auto overflow-x-hidden">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
                 <table className="w-full text-xs border-collapse table-fixed">
                     <thead className="bg-slate-100 text-slate-500 font-semibold uppercase tracking-wider text-[10px] sticky top-0 z-10 shadow-sm">
                         <tr>
@@ -385,7 +455,7 @@ function App() {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {calculatedData.length === 0 ? (
+                        {filteredData.length === 0 ? (
                             <tr>
                                 <td colSpan={10} className="py-16 text-center text-slate-400">
                                     <div className="flex flex-col items-center justify-center space-y-4 opacity-70">
@@ -393,17 +463,18 @@ function App() {
                                             <FolderOpen className="w-10 h-10 text-indigo-200" />
                                         </div>
                                         <div className="text-center">
-                                            <p className="text-sm font-semibold text-slate-600">Belum Ada Data Transaksi</p>
+                                            <p className="text-sm font-semibold text-slate-600">
+                                                {transactions.length > 0 ? 'Tidak ada data pada tanggal ini' : 'Belum Ada Data Transaksi'}
+                                            </p>
                                             <p className="text-xs text-slate-400 mt-1">
-                                                Mulai dengan menekan tombol <span className="font-bold text-indigo-500">Tambah Transaksi</span><br/>
-                                                atau Import data dari Excel/JSON
+                                                {transactions.length > 0 ? 'Coba ubah filter tanggal' : 'Mulai dengan menekan tombol Tambah Transaksi'}
                                             </p>
                                         </div>
                                     </div>
                                 </td>
                             </tr>
                         ) : (
-                            calculatedData.map(row => (
+                            filteredData.map(row => (
                                 <tr key={row.id} className="group hover:bg-slate-50 transition-colors duration-150">
                                     {/* ID */}
                                     <td className="p-0 text-center text-slate-400 font-mono text-[10px] border-r border-slate-100">
@@ -526,7 +597,7 @@ function App() {
                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
                    <span>Data tersimpan otomatis di browser</span>
                 </div>
-                <div>{calculatedData.length} Baris</div>
+                <div>{filteredData.length} Baris ditampilkan (Total: {transactions.length})</div>
             </div>
         </div>
       </main>
