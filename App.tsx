@@ -1,11 +1,19 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, Trash2, FileJson, Table, Save, Plus, X, Calendar, Type, TrendingUp, TrendingDown, CheckCircle2, Upload, RefreshCw, Github, FolderOpen, Filter, XCircle, Bell } from 'lucide-react';
+import { LayoutDashboard, Trash2, FileJson, Table, Save, Plus, X, Calendar, Type, TrendingUp, TrendingDown, CheckCircle2, Upload, RefreshCw, Github, FolderOpen, Filter, XCircle, Bell, FileText, Download, HardDrive } from 'lucide-react';
 import { Transaction, CalculatedTransaction } from './types';
 import { formatCurrency, parseCurrency, parseDateValue, formatDateToDisplay } from './utils/formatters';
 import { exportToExcel, importFromExcel } from './utils/excel';
 
 // Removed static import of metadata.json to prevent module resolution errors
 // import localMetadata from './metadata.json'; 
+
+interface SavedFile {
+    id: number;
+    name: string;
+    date: string;
+    itemCount: number;
+    data: Transaction[];
+}
 
 function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -25,6 +33,12 @@ function App() {
   // Filter State
   const [dateFilter, setDateFilter] = useState({ start: '', end: '' });
   const [isFilterVisible, setIsFilterVisible] = useState(false);
+
+  // File Manager State
+  const [showFileManager, setShowFileManager] = useState(false);
+  const [savedFiles, setSavedFiles] = useState<SavedFile[]>([]);
+  const [fileNameInput, setFileNameInput] = useState('');
+  const [activeTab, setActiveTab] = useState<'save' | 'open'>('open');
 
   // New Transaction Form State
   const [newTrans, setNewTrans] = useState({
@@ -70,6 +84,7 @@ function App() {
 
   // Load from local storage on mount
   useEffect(() => {
+    // 1. Load Current Active Data
     const saved = localStorage.getItem('luxury_cashflow_data');
     if (saved) {
       try {
@@ -77,14 +92,25 @@ function App() {
         if (Array.isArray(parsed)) {
           setTransactions(parsed);
         } else {
-          setTransactions([]); // Default to empty
+          setTransactions([]); 
         }
       } catch (e) {
-        setTransactions([]); // Default to empty
+        setTransactions([]); 
       }
     } else {
-      setTransactions([]); // Default to empty (No initial dummy data)
+      setTransactions([]); 
     }
+
+    // 2. Load Saved Files List
+    const files = localStorage.getItem('ohmonsea_saved_files');
+    if (files) {
+        try {
+            setSavedFiles(JSON.parse(files));
+        } catch (e) {
+            setSavedFiles([]);
+        }
+    }
+
     setLoading(false);
   }, []);
 
@@ -94,6 +120,13 @@ function App() {
       localStorage.setItem('luxury_cashflow_data', JSON.stringify(transactions));
     }
   }, [transactions, loading]);
+
+  // Save SavedFiles list to local storage whenever it changes
+  useEffect(() => {
+      if (!loading) {
+          localStorage.setItem('ohmonsea_saved_files', JSON.stringify(savedFiles));
+      }
+  }, [savedFiles, loading]);
 
   // Calculations (Global - Runs on ALL data to ensure running balance is correct)
   const calculatedData = useMemo(() => {
@@ -235,6 +268,51 @@ function App() {
     setIsModalOpen(false);
   };
 
+  // --- FILE MANAGER HANDLERS ---
+  const handleSaveInternal = () => {
+      if (!fileNameInput.trim()) {
+          alert("Masukkan nama file!");
+          return;
+      }
+
+      const newFile: SavedFile = {
+          id: Date.now(),
+          name: fileNameInput,
+          date: new Date().toISOString(),
+          itemCount: transactions.length,
+          data: [...transactions]
+      };
+
+      setSavedFiles(prev => {
+          // Check if name exists
+          const exists = prev.findIndex(f => f.name.toLowerCase() === fileNameInput.toLowerCase());
+          if (exists >= 0) {
+              if (!confirm(`File "${fileNameInput}" sudah ada. Timpa?`)) return prev;
+              const updated = [...prev];
+              updated[exists] = newFile;
+              return updated;
+          }
+          return [newFile, ...prev];
+      });
+
+      setFileNameInput('');
+      setActiveTab('open');
+      alert('Data berhasil disimpan ke folder web!');
+  };
+
+  const handleLoadInternal = (file: SavedFile) => {
+      if (transactions.length > 0) {
+          if (!confirm(`Tampilkan file "${file.name}"? Data saat ini yang belum disimpan akan hilang.`)) return;
+      }
+      setTransactions(file.data);
+      setShowFileManager(false);
+  };
+
+  const handleDeleteInternal = (id: number) => {
+      if (!confirm("Hapus file ini permanen dari penyimpanan web?")) return;
+      setSavedFiles(prev => prev.filter(f => f.id !== id));
+  };
+
   const handleJsonExport = () => {
     const dataStr = JSON.stringify(transactions, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
@@ -257,10 +335,11 @@ function App() {
       try {
         const json = JSON.parse(event.target?.result as string);
         if (Array.isArray(json)) {
-            if(confirm(`Ditemukan ${json.length} baris data. Timpa data saat ini?`)) {
+            if(confirm(`Ditemukan ${json.length} baris data dari file JSON. Load data ini?`)) {
                 // Re-index imported data just in case
                 const reIndexed = json.map((item, index) => ({...item, id: index + 1}));
                 setTransactions(reIndexed);
+                setShowFileManager(false);
             }
         }
       } catch (err) {
@@ -282,10 +361,11 @@ function App() {
 
     try {
       const data = await importFromExcel(file);
-      if(confirm(`Berhasil membaca ${data.length} baris data Excel. Timpa data saat ini?`)) {
+      if(confirm(`Berhasil membaca ${data.length} baris data Excel. Load data ini?`)) {
         // Re-index imported data
         const reIndexed = data.map((item, index) => ({...item, id: index + 1}));
         setTransactions(reIndexed);
+        setShowFileManager(false);
       }
     } catch (err) {
       alert("Gagal Import Excel: " + err);
@@ -395,38 +475,32 @@ function App() {
 
                         <div className="w-px h-6 bg-slate-200 mx-1"></div>
 
+                        {/* File Manager Button (Simpan/Buka) */}
+                        <button 
+                            onClick={() => {
+                                setShowFileManager(true);
+                                setActiveTab('open');
+                            }}
+                            className="flex items-center px-3 py-2 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-md shadow-sm transition-colors"
+                            title="Manajer File (Simpan/Buka)"
+                        >
+                            <FolderOpen className="w-3.5 h-3.5 sm:mr-1.5 text-indigo-500" />
+                            <span className="hidden sm:inline">Folder Web</span>
+                        </button>
+
+                        {/* Hidden Inputs for File Import */}
                         <input type="file" ref={fileExcelRef} accept=".xlsx, .xls" className="hidden" onChange={handleExcelImport} />
                         <input type="file" ref={fileJsonRef} accept=".json" className="hidden" onChange={handleJsonImport} />
-
-                        {/* Import JSON Button */}
-                        <button 
-                            onClick={() => fileJsonRef.current?.click()}
-                            className="p-2 text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors shadow-sm"
-                            title="Import JSON"
-                        >
-                            <Upload className="w-3.5 h-3.5" />
-                        </button>
-
-                        {/* Save JSON */}
-                        <button 
-                            onClick={handleJsonExport} 
-                            className="p-2 text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors shadow-sm"
-                            title="Export JSON"
-                        >
-                            <Save className="w-3.5 h-3.5" />
-                        </button>
                         
-                        {/* Excel Dropdown */}
-                        <div className="relative group">
-                            <button className="flex items-center px-3 py-2 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-md shadow-sm shadow-emerald-200 transition-colors">
-                                <Table className="w-3.5 h-3.5 sm:mr-1.5" />
-                                <span className="hidden sm:inline">Excel</span>
-                            </button>
-                            <div className="absolute right-0 mt-1 w-32 bg-white rounded-md shadow-lg border border-slate-200 hidden group-hover:block z-50">
-                                <button onClick={() => fileExcelRef.current?.click()} className="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-slate-700">Import Excel</button>
-                                <button onClick={handleExcelExport} className="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-slate-700">Export Excel</button>
-                            </div>
-                        </div>
+                        {/* Excel Export Shortcut */}
+                        <button 
+                            onClick={handleExcelExport}
+                            className="flex items-center px-3 py-2 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-md shadow-sm shadow-emerald-200 transition-colors"
+                            title="Download Excel"
+                        >
+                            <Table className="w-3.5 h-3.5 sm:mr-1.5" />
+                            <span className="hidden sm:inline">Excel</span>
+                        </button>
 
                          <button onClick={handleReset} className="p-2 text-rose-600 hover:bg-rose-50 rounded-md transition-colors ml-1" title="Hapus Semua Data">
                             <Trash2 className="w-4 h-4" />
@@ -633,6 +707,165 @@ function App() {
                 >
                     Abaikan
                 </button>
+            </div>
+        </div>
+      )}
+
+      {/* --- FILE MANAGER MODAL --- */}
+      {showFileManager && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+             <div 
+                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" 
+                onClick={() => setShowFileManager(false)}
+            ></div>
+            <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-white/50 modal-animate overflow-hidden flex flex-col max-h-[85vh]">
+                {/* Header */}
+                <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-indigo-100 p-2 rounded-lg">
+                            <FolderOpen className="w-5 h-5 text-indigo-600" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-bold text-slate-800 tracking-tight">Folder Web</h2>
+                            <p className="text-xs text-slate-500">Manajemen File Internal</p>
+                        </div>
+                    </div>
+                    <button onClick={() => setShowFileManager(false)} className="text-slate-400 hover:text-rose-500 transition-colors">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex border-b border-slate-200">
+                    <button 
+                        onClick={() => setActiveTab('open')}
+                        className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'open' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+                    >
+                        Buka File ({savedFiles.length})
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('save')}
+                        className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'save' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+                    >
+                        Simpan / Ekspor
+                    </button>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30">
+                    {activeTab === 'open' ? (
+                        <div className="space-y-4">
+                            {savedFiles.length === 0 ? (
+                                <div className="text-center py-10 text-slate-400">
+                                    <FolderOpen className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                                    <p>Belum ada file tersimpan di Folder Web.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {savedFiles.map(file => (
+                                        <div key={file.id} className="bg-white p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all flex justify-between items-center group">
+                                            <div className="flex items-center gap-3">
+                                                <div className="bg-emerald-50 p-2 rounded text-emerald-600">
+                                                    <FileText className="w-5 h-5" />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold text-slate-800 text-sm">{file.name}</h3>
+                                                    <p className="text-[10px] text-slate-500 flex items-center gap-2">
+                                                        <span>{new Date(file.date).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit'})}</span>
+                                                        <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                                        <span>{file.itemCount} Transaksi</span>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button 
+                                                    onClick={() => handleLoadInternal(file)}
+                                                    className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-md hover:bg-indigo-700 font-medium shadow-sm"
+                                                >
+                                                    Buka
+                                                </button>
+                                                <button 
+                                                    onClick={() => handleDeleteInternal(file.id)}
+                                                    className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                             {/* Import External */}
+                             <div className="mt-6 pt-4 border-t border-slate-200">
+                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Import dari Perangkat</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => fileJsonRef.current?.click()} className="flex items-center justify-center gap-2 p-3 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 text-xs font-medium transition-colors">
+                                        <Upload className="w-4 h-4" /> Upload JSON
+                                    </button>
+                                    <button onClick={() => fileExcelRef.current?.click()} className="flex items-center justify-center gap-2 p-3 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 text-xs font-medium transition-colors">
+                                        <Table className="w-4 h-4 text-emerald-600" /> Upload Excel
+                                    </button>
+                                </div>
+                             </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-6">
+                             {/* Save Internal */}
+                             <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm">
+                                <h3 className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-2">
+                                    <HardDrive className="w-4 h-4 text-indigo-500" />
+                                    Simpan ke Folder Web
+                                </h3>
+                                <p className="text-[11px] text-slate-500 mb-4">Simpan data saat ini agar bisa dibuka kembali nanti di browser ini.</p>
+                                
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="text" 
+                                        placeholder="Nama File (Contoh: Plan Maret 2026)" 
+                                        value={fileNameInput}
+                                        onChange={(e) => setFileNameInput(e.target.value)}
+                                        className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none"
+                                    />
+                                    <button 
+                                        onClick={handleSaveInternal}
+                                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-md shadow-indigo-200 transition-colors"
+                                    >
+                                        Simpan
+                                    </button>
+                                </div>
+                             </div>
+
+                             {/* Export External */}
+                             <div>
+                                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <Download className="w-4 h-4" /> Ekspor ke Perangkat
+                                </h3>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={handleJsonExport} className="group relative overflow-hidden bg-white border border-slate-200 hover:border-slate-300 p-4 rounded-xl text-left transition-all hover:shadow-md">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div className="bg-slate-100 p-2 rounded-lg group-hover:bg-slate-200 transition-colors">
+                                                <FileJson className="w-5 h-5 text-slate-600" />
+                                            </div>
+                                        </div>
+                                        <span className="block font-bold text-slate-700 text-sm">File JSON</span>
+                                        <span className="text-[10px] text-slate-400">Backup lengkap aplikasi</span>
+                                    </button>
+
+                                    <button onClick={handleExcelExport} className="group relative overflow-hidden bg-white border border-slate-200 hover:border-emerald-200 p-4 rounded-xl text-left transition-all hover:shadow-md">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div className="bg-emerald-50 p-2 rounded-lg group-hover:bg-emerald-100 transition-colors">
+                                                <Table className="w-5 h-5 text-emerald-600" />
+                                            </div>
+                                        </div>
+                                        <span className="block font-bold text-slate-700 text-sm">File Excel</span>
+                                        <span className="text-[10px] text-slate-400">Format laporan tabel</span>
+                                    </button>
+                                </div>
+                             </div>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
       )}
