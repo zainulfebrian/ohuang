@@ -1,0 +1,6 @@
+<!-- 
+CARA PENGGUNAAN:
+1. Copy seluruh output XML dari AI (mulai dari <changes> sampai </changes>).
+2. Paste di sini (timpa semua isi file ini).
+3. Jalankan perintah di terminal: node apply_patch.js
+-->
