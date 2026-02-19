@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, Trash2, FileJson, Table, Save, Plus, X, Calendar, Type, TrendingUp, TrendingDown, CheckCircle2, Upload, RefreshCw, Github, FolderOpen, Filter, XCircle } from 'lucide-react';
+import { LayoutDashboard, Trash2, FileJson, Table, Save, Plus, X, Calendar, Type, TrendingUp, TrendingDown, CheckCircle2, Upload, RefreshCw, Github, FolderOpen, Filter, XCircle, Bell } from 'lucide-react';
 import { Transaction, CalculatedTransaction } from './types';
 import { formatCurrency, parseCurrency, parseDateValue, formatDateToDisplay } from './utils/formatters';
 import { exportToExcel, importFromExcel } from './utils/excel';
@@ -20,6 +20,7 @@ function App() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [remoteVersion, setRemoteVersion] = useState('');
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [showUpdateToast, setShowUpdateToast] = useState(false);
   
   // Filter State
   const [dateFilter, setDateFilter] = useState({ start: '', end: '' });
@@ -58,6 +59,7 @@ function App() {
                         if (remoteMeta && remoteMeta.version !== localMeta.version) {
                             setRemoteVersion(remoteMeta.version);
                             setUpdateAvailable(true);
+                            setShowUpdateToast(true); // Trigger Notification
                         }
                     })
                     .catch(err => console.log("Gagal cek update:", err));
@@ -136,13 +138,16 @@ function App() {
         let isValid = true;
 
         if (dateFilter.start) {
-            const startVal = new Date(dateFilter.start).getTime();
-            // Compare timestamps (ignoring time if possible, but parseDateValue returns time)
+            // Parse YYYY-MM-DD input to Local Date 00:00:00 to match parseDateValue behavior
+            const [y, m, d] = dateFilter.start.split('-').map(Number);
+            const startVal = new Date(y, m - 1, d).getTime();
             if (itemDateVal < startVal) isValid = false;
         }
 
         if (dateFilter.end) {
-            const endVal = new Date(dateFilter.end).getTime();
+            // Parse YYYY-MM-DD input to Local Date 00:00:00
+            const [y, m, d] = dateFilter.end.split('-').map(Number);
+            const endVal = new Date(y, m - 1, d).getTime();
             if (itemDateVal > endVal) isValid = false;
         }
 
@@ -601,6 +606,36 @@ function App() {
             </div>
         </div>
       </main>
+
+      {/* --- NOTIFICATION TOAST --- */}
+      {showUpdateToast && (
+        <div className="fixed bottom-6 right-6 z-[60] bg-slate-900 text-white p-4 rounded-xl shadow-2xl border border-slate-700 flex items-center gap-4 toast-slide-in max-w-sm">
+            <div className="p-2.5 bg-indigo-600 rounded-full shrink-0">
+                <RefreshCw className="w-5 h-5 text-white animate-spin-slow" />
+            </div>
+            <div className="flex-1 min-w-0">
+                <h4 className="font-bold text-sm truncate">Update Tersedia!</h4>
+                <p className="text-xs text-slate-400 mt-0.5">Versi <span className="text-white font-mono">{remoteVersion}</span> siap diinstall.</p>
+            </div>
+            <div className="flex flex-col gap-2 shrink-0">
+                <button 
+                    onClick={() => {
+                        setIsUpdateModalOpen(true);
+                        setShowUpdateToast(false);
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-xs font-bold transition-colors shadow-lg shadow-indigo-900/50"
+                >
+                    Lihat
+                </button>
+                <button 
+                    onClick={() => setShowUpdateToast(false)}
+                    className="text-xs text-slate-500 hover:text-white transition-colors underline decoration-slate-600"
+                >
+                    Abaikan
+                </button>
+            </div>
+        </div>
+      )}
 
       {/* --- LUXURY ADD TRANSACTION MODAL --- */}
       {isModalOpen && (
