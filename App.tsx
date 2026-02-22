@@ -482,15 +482,15 @@ export function App() {
                             <tr>
                                 <th className="w-[3%] p-3 text-center border-b border-r border-stone-200">ID</th>
                                 <th className="w-[8%] p-3 text-left border-b border-r border-stone-200">Tanggal</th>
-                                <th className="w-[20%] p-3 text-left border-b border-r border-stone-200">Keterangan</th>
-                                <th className="w-[10%] p-3 text-left border-b border-r border-stone-200">Kategori</th>
+                                <th className="w-[19%] p-3 text-left border-b border-r border-stone-200">Keterangan</th>
+                                <th className="w-[8%] p-3 text-left border-b border-r border-stone-200">Kategori</th>
                                 <th className="w-[9%] p-3 text-right border-b border-stone-200 bg-emerald-50/50 text-emerald-700 hidden sm:table-cell">Renc Masuk</th>
                                 <th className="w-[9%] p-3 text-right border-b border-stone-200 bg-rose-50/50 text-rose-700 hidden sm:table-cell">Renc Keluar</th>
                                 <th className="w-[9%] p-3 text-right border-b border-r border-stone-200 bg-stone-100 text-stone-700 font-bold hidden sm:table-cell">Est Saldo</th>
                                 <th className="w-[9%] p-3 text-right border-b border-stone-200 bg-emerald-100/30 text-emerald-800">Akt Masuk</th>
                                 <th className="w-[9%] p-3 text-right border-b border-stone-200 bg-rose-100/30 text-rose-800">Akt Keluar</th>
                                 <th className="w-[9%] p-3 text-right border-b border-r border-stone-200 bg-stone-100 text-stone-800 font-bold">Saldo Akt</th>
-                                <th className="w-[5%] p-3 text-right border-b border-stone-200">Selisih</th>
+                                <th className="w-[8%] p-3 text-right border-b border-stone-200">Selisih</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-stone-100">
@@ -527,7 +527,9 @@ export function App() {
                                     <td className="p-0 border-stone-100"><input type="text" value={row.actIncome ? formatCurrency(row.actIncome) : ''} onChange={(e) => handleUpdate(row.id, 'actIncome', parseCurrency(e.target.value))} className="w-full h-full px-3 bg-transparent outline-none text-right text-emerald-600 font-bold font-mono" placeholder="0"/></td>
                                     <td className="p-0 border-stone-100"><input type="text" value={row.actExpense ? formatCurrency(row.actExpense) : ''} onChange={(e) => handleUpdate(row.id, 'actExpense', parseCurrency(e.target.value))} className="w-full h-full px-3 bg-transparent outline-none text-right text-rose-600 font-bold font-mono" placeholder="0"/></td>
                                     <td className="p-0 border-r border-stone-100 bg-stone-50/50"><div className="flex items-center justify-end h-full px-3 text-stone-800 font-mono font-bold">{formatCurrency(row.actBalance)}</div></td>
-                                    <td className="p-0 text-right px-3 text-stone-400 text-[9px] font-mono">{row.difference !== 0 && formatCurrency(row.difference)}</td>
+                                    <td className={cn("p-0 text-right px-3 font-mono font-medium text-xs", row.difference > 0 ? "text-emerald-600" : row.difference < 0 ? "text-rose-600" : "text-stone-300")}>
+                                        {formatCurrency(row.difference)}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
