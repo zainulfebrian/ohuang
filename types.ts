@@ -1,12 +1,15 @@
+export type TransactionCategory = 'Pemasukan' | 'Kebutuhan Pokok' | 'Tagihan' | 'Hiburan' | 'Tabungan' | 'Cicilan' | 'Lainnya';
+
 export interface Transaction {
     id: number;
     date: string;
     description: string;
+    category: TransactionCategory; // New Field
     planIncome: number;
     planExpense: number;
     actIncome: number;
     actExpense: number;
-    isNew?: boolean; // Flag to mark newly added rows
+    isNew?: boolean;
 }
 
 export interface CalculatedTransaction extends Transaction {

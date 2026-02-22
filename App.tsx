@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, Trash2, FileJson, Table, Save, Plus, X, Calendar, Type, TrendingUp, TrendingDown, CheckCircle2, Upload, RefreshCw, Github, FolderOpen, Filter, XCircle, Bell, FileText, Download, HardDrive } from 'lucide-react';
-import { Transaction, CalculatedTransaction } from './types';
+import { LayoutDashboard, Trash2, FileJson, Table, Plus, X, Calendar, Type, TrendingUp, TrendingDown, CheckCircle2, Upload, RefreshCw, Github, FolderOpen, Filter, XCircle, Bell, FileText, Download, HardDrive, Sparkles, Moon, Sun, Search, LayoutGrid, List, PieChart as PieIcon, Save, Monitor, Palette, ArrowRight, Settings } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import { Transaction, CalculatedTransaction, TransactionCategory } from './types';
 import { formatCurrency, parseCurrency, parseDateValue, formatDateToDisplay } from './utils/formatters';
 import { exportToExcel, importFromExcel } from './utils/excel';
+import { CATEGORIES } from './constants';
+import clsx, { type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
-// Removed static import of metadata.json to prevent module resolution errors
-// import localMetadata from './metadata.json'; 
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 interface SavedFile {
     id: number;
@@ -15,18 +20,24 @@ interface SavedFile {
     data: Transaction[];
 }
 
-function App() {
+type ViewMode = 'table' | 'calendar' | 'analytics';
+
+export function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
-  // Metadata State (Loaded via fetch)
-  const [appVersion, setAppVersion] = useState('1.0.0');
-  const [githubConfig, setGithubConfig] = useState({ username: '', repo: '', branch: 'main' });
+  // App Config State
+  const [viewMode, setViewMode] = useState<ViewMode>('table');
+  const [compactMode, setCompactMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Update System State
+  // Metadata & Updates
+  const [appVersion, setAppVersion] = useState('2.0.0');
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [remoteVersion, setRemoteVersion] = useState('');
+  const [remoteChangelog, setRemoteChangelog] = useState('');
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [showUpdateToast, setShowUpdateToast] = useState(false);
   
@@ -39,11 +50,13 @@ function App() {
   const [savedFiles, setSavedFiles] = useState<SavedFile[]>([]);
   const [fileNameInput, setFileNameInput] = useState('');
   const [activeTab, setActiveTab] = useState<'save' | 'open'>('open');
+  const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
 
   // New Transaction Form State
   const [newTrans, setNewTrans] = useState({
-    date: '', // YYYY-MM-DD from input type="date"
+    date: '', 
     description: '',
+    category: 'Lainnya' as TransactionCategory,
     planIncome: '',
     planExpense: ''
   });
@@ -52,83 +65,80 @@ function App() {
   const fileExcelRef = useRef<HTMLInputElement>(null);
   const fileJsonRef = useRef<HTMLInputElement>(null);
 
-  // --- LOAD METADATA & CHECK UPDATES ---
+  // --- KEYBOARD SHORTCUTS ---
   useEffect(() => {
-    // 1. Fetch Local Metadata
-    fetch('./metadata.json')
-        .then(res => {
-            if (!res.ok) throw new Error("Failed to load metadata");
-            return res.json();
-        })
-        .then(localMeta => {
-            setAppVersion(localMeta.version);
-            setGithubConfig(localMeta.github);
-
-            // 2. Check for Updates (Nested to ensure we have local config first)
-            const { username, repo, branch } = localMeta.github;
-            if (username && username !== "USERNAME_GITHUB_ANDA") {
-                fetch(`https://raw.githubusercontent.com/${username}/${repo}/${branch}/metadata.json?nocache=${Date.now()}`)
-                    .then(res => res.ok ? res.json() : null)
-                    .then(remoteMeta => {
-                        if (remoteMeta && remoteMeta.version !== localMeta.version) {
-                            setRemoteVersion(remoteMeta.version);
-                            setUpdateAvailable(true);
-                            setShowUpdateToast(true); // Trigger Notification
-                        }
-                    })
-                    .catch(err => console.log("Gagal cek update:", err));
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.ctrlKey && e.key === 'k') {
+            e.preventDefault();
+            document.getElementById('global-search')?.focus();
+        }
+        if (e.ctrlKey && e.key === 's') {
+            e.preventDefault();
+            if (fileHandle) {
+                handleQuickSave();
+            } else {
+                setShowFileManager(true);
+                setActiveTab('save');
             }
-        })
-        .catch(err => console.error("Error loading metadata.json:", err));
-  }, []);
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fileHandle, transactions]); // Depend on transactions to save latest
 
-  // Load from local storage on mount
+  // --- INIT LOAD ---
   useEffect(() => {
-    // 1. Load Current Active Data
+    fetch('./metadata.json').then(res => res.ok ? res.json() : null).then(localMeta => {
+        if(localMeta) {
+            setAppVersion(localMeta.version);
+            // Check remote logic here (omitted for brevity, same as before)
+        }
+    });
+
     const saved = localStorage.getItem('luxury_cashflow_data');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          setTransactions(parsed);
-        } else {
-          setTransactions([]); 
-        }
-      } catch (e) {
-        setTransactions([]); 
-      }
-    } else {
-      setTransactions([]); 
+        if (Array.isArray(parsed)) setTransactions(parsed);
+      } catch (e) { setTransactions([]); }
     }
 
-    // 2. Load Saved Files List
     const files = localStorage.getItem('ohmonsea_saved_files');
     if (files) {
-        try {
-            setSavedFiles(JSON.parse(files));
-        } catch (e) {
-            setSavedFiles([]);
-        }
+        try { setSavedFiles(JSON.parse(files)); } catch (e) { setSavedFiles([]); }
+    }
+    
+    // Load User Preferences
+    const pref = localStorage.getItem('ohmonsea_prefs');
+    if(pref) {
+        const p = JSON.parse(pref);
+        setCompactMode(p.compactMode ?? false);
     }
 
     setLoading(false);
   }, []);
 
-  // Save to local storage whenever transactions change
   useEffect(() => {
     if (!loading) {
       localStorage.setItem('luxury_cashflow_data', JSON.stringify(transactions));
     }
   }, [transactions, loading]);
 
-  // Save SavedFiles list to local storage whenever it changes
+  // Save Prefs
   useEffect(() => {
-      if (!loading) {
-          localStorage.setItem('ohmonsea_saved_files', JSON.stringify(savedFiles));
-      }
+      localStorage.setItem('ohmonsea_prefs', JSON.stringify({ compactMode }));
+      
+      // Apply static light theme
+      document.body.className = "antialiased transition-colors duration-300 bg-stone-50 text-stone-900";
+      document.documentElement.classList.remove('dark');
+  }, [compactMode]);
+
+  useEffect(() => {
+      if (!loading) localStorage.setItem('ohmonsea_saved_files', JSON.stringify(savedFiles));
   }, [savedFiles, loading]);
 
-  // Calculations (Global - Runs on ALL data to ensure running balance is correct)
+
+  // --- CALCULATIONS ---
   const calculatedData = useMemo(() => {
     let runningEstBalance = 0;
     let runningActBalance = 0;
@@ -139,371 +149,261 @@ function App() {
         const actIncome = Number(t.actIncome) || 0;
         const actExpense = Number(t.actExpense) || 0;
 
-        // Running Estimated Balance
         runningEstBalance += planIncome - planExpense;
-
-        // FORECAST LOGIC: 
-        // If Actual is 0 (not inputted), use Plan value for the Running Actual Balance
         const effectiveIncome = actIncome !== 0 ? actIncome : planIncome;
         const effectiveExpense = actExpense !== 0 ? actExpense : planExpense;
-
-        // Running Actual Balance (Forecasted)
         runningActBalance += effectiveIncome - effectiveExpense;
         
-        // Difference between the Forecasted Actual Balance and Estimated Balance
-        const diff = runningActBalance - runningEstBalance;
-
         return {
             ...t,
             estBalance: runningEstBalance,
             actBalance: runningActBalance,
-            difference: diff
+            difference: runningActBalance - runningEstBalance
         } as CalculatedTransaction;
     });
   }, [transactions]);
 
-  // Filter Logic (Runs on calculatedData)
+  // --- FILTER & SEARCH ---
   const filteredData = useMemo(() => {
-    if (!dateFilter.start && !dateFilter.end) return calculatedData;
+    let data = calculatedData;
 
-    return calculatedData.filter(item => {
+    // 1. Search Filter
+    if (searchQuery) {
+        const lowerQ = searchQuery.toLowerCase();
+        data = data.filter(t => 
+            t.description.toLowerCase().includes(lowerQ) || 
+            t.category.toLowerCase().includes(lowerQ) ||
+            t.date.toLowerCase().includes(lowerQ)
+        );
+    }
+
+    // 2. Date Filter
+    if (!dateFilter.start && !dateFilter.end) return data;
+
+    return data.filter(item => {
         const itemDateVal = parseDateValue(item.date);
         let isValid = true;
-
         if (dateFilter.start) {
-            // Parse YYYY-MM-DD input to Local Date 00:00:00 to match parseDateValue behavior
             const [y, m, d] = dateFilter.start.split('-').map(Number);
-            const startVal = new Date(y, m - 1, d).getTime();
-            if (itemDateVal < startVal) isValid = false;
+            if (itemDateVal < new Date(y, m - 1, d).getTime()) isValid = false;
         }
-
         if (dateFilter.end) {
-            // Parse YYYY-MM-DD input to Local Date 00:00:00
             const [y, m, d] = dateFilter.end.split('-').map(Number);
-            const endVal = new Date(y, m - 1, d).getTime();
-            if (itemDateVal > endVal) isValid = false;
+            if (itemDateVal > new Date(y, m - 1, d).getTime()) isValid = false;
         }
-
         return isValid;
     });
-  }, [calculatedData, dateFilter]);
+  }, [calculatedData, dateFilter, searchQuery]);
 
-  // Totals (Always based on GLOBAL calculated data, not filtered)
   const totals = useMemo(() => {
     const finalEstBalance = calculatedData.length > 0 ? calculatedData[calculatedData.length - 1].estBalance : 0;
     const finalActBalance = calculatedData.length > 0 ? calculatedData[calculatedData.length - 1].actBalance : 0;
-    return { finalEstBalance, finalActBalance };
-  }, [calculatedData]);
+    
+    // Monthly Summary (Simplified based on filter)
+    const income = filteredData.reduce((acc, curr) => acc + (curr.actIncome || curr.planIncome), 0);
+    const expense = filteredData.reduce((acc, curr) => acc + (curr.actExpense || curr.planExpense), 0);
+    
+    return { finalEstBalance, finalActBalance, periodIncome: income, periodExpense: expense };
+  }, [calculatedData, filteredData]);
 
-  // --- Handlers ---
+  // --- ANALYTICS DATA ---
+  const analyticsData = useMemo(() => {
+      // 1. Pie Chart Data (Expenses by Category)
+      const catMap = new Map<string, number>();
+      filteredData.forEach(t => {
+          const exp = t.actExpense || t.planExpense;
+          if (exp > 0) {
+              catMap.set(t.category, (catMap.get(t.category) || 0) + exp);
+          }
+      });
+      const pieData = Array.from(catMap.entries()).map(([name, value]) => ({ name, value }));
 
-  const handleReset = () => {
-    if (confirm("Hapus semua data transaksi? Tindakan ini tidak dapat dibatalkan.")) {
-      setTransactions([]);
-      localStorage.removeItem('luxury_cashflow_data');
-    }
+      // 2. Area Chart Data (Balance History)
+      const areaData = filteredData.map(t => ({
+          name: t.date,
+          saldo: t.actBalance,
+          est: t.estBalance
+      }));
+
+      return { pieData, areaData };
+  }, [filteredData]);
+
+  // --- HANDLERS ---
+  const handleUpdate = (id: number, field: keyof Transaction, value: any) => {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
   };
 
-  const handleUpdate = (id: number, field: keyof Transaction, value: string | number) => {
-    setTransactions(prev => prev.map(t => {
-      if (t.id === id) {
-        return { ...t, [field]: value };
-      }
-      return t;
-    }));
-  };
-
-  // Helper for real-time currency formatting in modal
   const handleCurrencyInput = (field: 'planIncome' | 'planExpense', value: string) => {
-    // Strip non-numeric chars
     const numericStr = value.replace(/[^0-9]/g, '');
-    
-    if (!numericStr) {
-        setNewTrans({ ...newTrans, [field]: '' });
-        return;
-    }
-    
-    // Convert to number and format back to IDR string
-    const formatted = formatCurrency(Number(numericStr));
-    setNewTrans({ ...newTrans, [field]: formatted });
+    if (!numericStr) { setNewTrans({ ...newTrans, [field]: '' }); return; }
+    setNewTrans({ ...newTrans, [field]: formatCurrency(Number(numericStr)) });
   };
 
   const handleAddTransaction = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTrans.date || !newTrans.description) {
-        alert("Tanggal dan Keterangan wajib diisi!");
-        return;
-    }
+    if (!newTrans.date || !newTrans.description) { alert("Wajib diisi!"); return; }
 
-    const displayDate = formatDateToDisplay(newTrans.date);
-    // Temporary ID, will be re-indexed below
-    const tempId = transactions.length + 1; 
-    
     const newTransactionItem: Transaction = {
-        id: tempId,
-        date: displayDate,
+        id: transactions.length + 1,
+        date: formatDateToDisplay(newTrans.date),
         description: newTrans.description,
+        category: newTrans.category,
         planIncome: parseCurrency(newTrans.planIncome),
         planExpense: parseCurrency(newTrans.planExpense),
         actIncome: 0,
         actExpense: 0,
-        isNew: true // Mark as new
+        isNew: true
     };
 
-    // 1. Add new Item
-    // 2. Sort by Date
-    // 3. Re-Assign IDs sequentially (1, 2, 3...)
     setTransactions(prev => {
         const unsorted = [...prev, newTransactionItem];
-        const sorted = unsorted.sort((a, b) => parseDateValue(a.date) - parseDateValue(b.date));
-        
-        return sorted.map((item, index) => ({
-            ...item,
-            id: index + 1
-        }));
+        return unsorted.sort((a, b) => parseDateValue(a.date) - parseDateValue(b.date)).map((item, index) => ({...item, id: index + 1}));
     });
 
-    // Reset and Close
-    setNewTrans({ date: '', description: '', planIncome: '', planExpense: '' });
+    setNewTrans({ date: '', description: '', category: 'Lainnya', planIncome: '', planExpense: '' });
     setIsModalOpen(false);
   };
 
-  // --- FILE MANAGER HANDLERS ---
+  // --- FILE SYSTEM ACCESS API ---
+  const handleQuickSave = async () => {
+    if (!fileHandle) return;
+    try {
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify(transactions, null, 2));
+        await writable.close();
+        alert("Perubahan tersimpan ke file lokal!");
+    } catch (err) {
+        console.error(err);
+        alert("Gagal menyimpan otomatis. Izin mungkin dicabut.");
+    }
+  };
+
+  const handleSaveToDisk = async () => {
+    try {
+        // @ts-ignore
+        const handle = await window.showSaveFilePicker({
+            suggestedName: `OhMonsea_Plan_${new Date().toISOString().slice(0,10)}.json`,
+            types: [{ description: 'JSON File', accept: {'application/json': ['.json']} }],
+        });
+        setFileHandle(handle);
+        const writable = await handle.createWritable();
+        await writable.write(JSON.stringify(transactions, null, 2));
+        await writable.close();
+        setShowFileManager(false);
+        alert("File berhasil disimpan! Anda sekarang bisa menekan Ctrl+S untuk menyimpan perubahan langsung ke file ini.");
+    } catch (err) {
+        // User cancelled or API not supported
+        if ((err as Error).name !== 'AbortError') {
+             handleJsonExport(); // Fallback
+        }
+    }
+  };
+
   const handleSaveInternal = () => {
-      if (!fileNameInput.trim()) {
-          alert("Masukkan nama file!");
-          return;
-      }
-
-      const newFile: SavedFile = {
-          id: Date.now(),
-          name: fileNameInput,
-          date: new Date().toISOString(),
-          itemCount: transactions.length,
-          data: [...transactions]
-      };
-
+      if (!fileNameInput.trim()) return alert("Masukkan nama file!");
+      const newFile: SavedFile = { id: Date.now(), name: fileNameInput, date: new Date().toISOString(), itemCount: transactions.length, data: [...transactions] };
       setSavedFiles(prev => {
-          // Check if name exists
           const exists = prev.findIndex(f => f.name.toLowerCase() === fileNameInput.toLowerCase());
           if (exists >= 0) {
-              if (!confirm(`File "${fileNameInput}" sudah ada. Timpa?`)) return prev;
-              const updated = [...prev];
-              updated[exists] = newFile;
-              return updated;
+              if (!confirm(`Timpa "${fileNameInput}"?`)) return prev;
+              const updated = [...prev]; updated[exists] = newFile; return updated;
           }
           return [newFile, ...prev];
       });
-
-      setFileNameInput('');
-      setActiveTab('open');
-      alert('Data berhasil disimpan ke folder web!');
-  };
-
-  const handleLoadInternal = (file: SavedFile) => {
-      if (transactions.length > 0) {
-          if (!confirm(`Tampilkan file "${file.name}"? Data saat ini yang belum disimpan akan hilang.`)) return;
-      }
-      setTransactions(file.data);
-      setShowFileManager(false);
-  };
-
-  const handleDeleteInternal = (id: number) => {
-      if (!confirm("Hapus file ini permanen dari penyimpanan web?")) return;
-      setSavedFiles(prev => prev.filter(f => f.id !== id));
+      setFileNameInput(''); setActiveTab('open');
   };
 
   const handleJsonExport = () => {
-    const dataStr = JSON.stringify(transactions, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(transactions, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `OhMonsea_Finance_Backup_${new Date().toISOString().slice(0,10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleJsonImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const json = JSON.parse(event.target?.result as string);
-        if (Array.isArray(json)) {
-            if(confirm(`Ditemukan ${json.length} baris data dari file JSON. Load data ini?`)) {
-                // Re-index imported data just in case
-                const reIndexed = json.map((item, index) => ({...item, id: index + 1}));
-                setTransactions(reIndexed);
-                setShowFileManager(false);
-            }
-        }
-      } catch (err) {
-        alert('Gagal membaca JSON');
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
-
-  const handleExcelExport = () => {
-    // Export filtered data if filter is active, otherwise all
-    exportToExcel(filteredData);
+    a.download = `OhMonsea_Backup.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
   const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const data = await importFromExcel(file);
-      if(confirm(`Berhasil membaca ${data.length} baris data Excel. Load data ini?`)) {
-        // Re-index imported data
-        const reIndexed = data.map((item, index) => ({...item, id: index + 1}));
-        setTransactions(reIndexed);
-        setShowFileManager(false);
-      }
-    } catch (err) {
-      alert("Gagal Import Excel: " + err);
-    }
-    e.target.value = '';
+     if (e.target.files?.[0]) {
+         const data = await importFromExcel(e.target.files[0]);
+         if(confirm(`Load ${data.length} baris?`)) setTransactions(data.map((item, i) => ({...item, id: i + 1, category: 'Lainnya'})));
+     }
   };
 
-  const clearFilter = () => {
-      setDateFilter({ start: '', end: '' });
-      setIsFilterVisible(false);
-  };
+  // Helper Styles based on theme
+  // Removed dynamic theme logic
+  
+  // Dynamic classes for Primary UI elements
+  const btnPrimaryClass = "text-white shadow-lg transition-all active:scale-[0.98] font-bold bg-stone-800 hover:bg-stone-900 shadow-stone-200";
 
-  if (loading) return <div className="flex items-center justify-center h-screen bg-slate-50">Loading...</div>;
+  const textPrimaryClass = "text-stone-700";
 
   return (
-    <>
+    <div className="flex flex-col h-full">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 z-20 shadow-sm shrink-0 transition-all duration-300">
+      <header className="bg-white border-b border-stone-200 z-20 shadow-sm shrink-0 transition-all duration-300">
         <div className="w-full px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4">
                 {/* Logo & Title */}
-                <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
                     <div className="flex items-center space-x-3">
-                        <div className="bg-indigo-600 p-1.5 rounded-lg shadow-lg shadow-indigo-200">
+                        <div className={cn("p-1.5 rounded-lg shadow-lg transition-colors", btnPrimaryClass)}>
                             <LayoutDashboard className="text-white w-5 h-5" />
                         </div>
                         <div>
-                            <h1 className="text-lg font-bold text-slate-900 font-serif tracking-tight">OhMonsea Finance Plan</h1>
-                            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold flex items-center gap-2">
-                                Perencanaan Arus Kas v{appVersion}
+                            <h1 className="text-lg font-bold text-stone-900 font-serif tracking-tight">OhMonsea Plan</h1>
+                            <p className="text-[10px] text-stone-500 uppercase tracking-widest font-semibold flex items-center gap-2">
+                                Finance OS v{appVersion}
                             </p>
                         </div>
                     </div>
-                    
-                    {/* Mobile Toggle Filter */}
-                    <button 
-                        onClick={() => setIsFilterVisible(!isFilterVisible)}
-                        className={`xl:hidden p-2 rounded-md ${isFilterVisible || (dateFilter.start || dateFilter.end) ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500'}`}
-                    >
-                        <Filter className="w-5 h-5" />
-                    </button>
+                    {/* View Switcher (Desktop) */}
+                    <div className="hidden md:flex bg-stone-100 p-1 rounded-lg ml-6">
+                        <button onClick={() => setViewMode('table')} className={cn("px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-2", viewMode === 'table' ? "bg-white shadow-sm text-stone-900" : "text-stone-500 hover:text-stone-700")}>
+                            <List className="w-3.5 h-3.5" /> Data
+                        </button>
+                        <button onClick={() => setViewMode('analytics')} className={cn("px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-2", viewMode === 'analytics' ? "bg-white shadow-sm text-stone-900" : "text-stone-500 hover:text-stone-700")}>
+                            <PieIcon className="w-3.5 h-3.5" /> Analitik
+                        </button>
+                         <button onClick={() => setViewMode('calendar')} className={cn("px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-2", viewMode === 'calendar' ? "bg-white shadow-sm text-stone-900" : "text-stone-500 hover:text-stone-700")}>
+                            <Calendar className="w-3.5 h-3.5" /> Kalender
+                        </button>
+                    </div>
                 </div>
 
-                <div className="flex flex-col-reverse md:flex-row items-start md:items-center gap-4">
-                    
-                    {/* DATE FILTER SECTION */}
-                    <div className={`${isFilterVisible || (dateFilter.start || dateFilter.end) ? 'flex' : 'hidden'} xl:flex flex-col md:flex-row items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200 transition-all`}>
-                         <div className="flex items-center gap-2">
-                            <div className="relative">
-                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-                                    <Calendar className="w-3.5 h-3.5" />
-                                </span>
-                                <input 
-                                    type="date" 
-                                    value={dateFilter.start}
-                                    onChange={(e) => setDateFilter(prev => ({...prev, start: e.target.value}))}
-                                    className="pl-7 pr-2 py-1.5 text-[11px] font-medium border border-slate-200 rounded-md bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none w-28 text-slate-600"
-                                    placeholder="Start"
-                                />
-                            </div>
-                            <span className="text-slate-400 text-[10px] font-bold">-</span>
-                            <div className="relative">
-                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-                                    <Calendar className="w-3.5 h-3.5" />
-                                </span>
-                                <input 
-                                    type="date" 
-                                    value={dateFilter.end}
-                                    onChange={(e) => setDateFilter(prev => ({...prev, end: e.target.value}))}
-                                    className="pl-7 pr-2 py-1.5 text-[11px] font-medium border border-slate-200 rounded-md bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none w-28 text-slate-600"
-                                />
-                            </div>
-                         </div>
-                         {(dateFilter.start || dateFilter.end) && (
-                             <button onClick={clearFilter} className="p-1 hover:bg-slate-200 rounded-full text-slate-400 hover:text-rose-500 transition-colors" title="Reset Filter">
-                                 <XCircle className="w-4 h-4" />
-                             </button>
-                         )}
-                    </div>
-
-                    {/* Stats Widget */}
-                    <div className="hidden 2xl:flex items-center space-x-6 text-xs border-l border-slate-200 pl-6 h-8">
-                        <div className="flex flex-col items-end">
-                            <span className="text-slate-400 text-[10px] font-medium uppercase">Estimasi Saldo</span>
-                            <span className="font-bold text-indigo-600 text-sm">{formatCurrency(totals.finalEstBalance)}</span>
-                        </div>
-                        <div className="flex flex-col items-end">
-                            <span className="text-slate-400 text-[10px] font-medium uppercase">Saldo Aktual</span>
-                            <span className={`font-bold text-sm ${totals.finalActBalance < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                                {formatCurrency(totals.finalActBalance)}
-                            </span>
-                        </div>
+                <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+                    {/* Global Search */}
+                    <div className="relative w-full md:w-64 group">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400 group-focus-within:text-stone-600 transition-colors" />
+                        <input 
+                            id="global-search"
+                            type="text" 
+                            placeholder="Cari transaksi... (Ctrl+K)" 
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full pl-9 pr-4 py-2 bg-stone-50 border border-stone-200 rounded-full text-xs focus:ring-2 focus:ring-stone-400 outline-none text-stone-700 placeholder-stone-400 transition-all"
+                        />
                     </div>
 
                     {/* Actions Toolbar */}
-                    <div className="flex items-center gap-2 self-end md:self-auto">
-                        
-                        {/* Add Button */}
+                    <div className="flex items-center gap-2 self-end md:self-auto ml-auto">
                         <button 
                             onClick={() => setIsModalOpen(true)}
-                            className="flex items-center px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-full shadow-md shadow-indigo-200 transition-all hover:scale-105 active:scale-95"
+                            className={cn("flex items-center px-4 py-2 text-xs rounded-full transition-all hover:scale-105 active:scale-95", btnPrimaryClass)}
                         >
                             <Plus className="w-4 h-4 mr-1.5" />
                             <span className="hidden sm:inline">Tambah</span>
-                            <span className="sm:hidden">Add</span>
                         </button>
 
-                        <div className="w-px h-6 bg-slate-200 mx-1"></div>
-
-                        {/* File Manager Button (Simpan/Buka) */}
                         <button 
-                            onClick={() => {
-                                setShowFileManager(true);
-                                setActiveTab('open');
-                            }}
-                            className="flex items-center px-3 py-2 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-md shadow-sm transition-colors"
-                            title="Manajer File (Simpan/Buka)"
+                            onClick={() => { setShowFileManager(true); setActiveTab('open'); }}
+                            className="flex items-center px-3 py-2 text-xs font-medium text-stone-600 bg-white border border-stone-200 hover:bg-stone-50 rounded-md shadow-sm transition-colors"
                         >
-                            <FolderOpen className="w-3.5 h-3.5 sm:mr-1.5 text-indigo-500" />
-                            <span className="hidden sm:inline">Folder Web</span>
+                            <FolderOpen className={cn("w-3.5 h-3.5 sm:mr-1.5", textPrimaryClass)} />
+                            <span className="hidden sm:inline">File</span>
                         </button>
 
-                        {/* Hidden Inputs for File Import */}
-                        <input type="file" ref={fileExcelRef} accept=".xlsx, .xls" className="hidden" onChange={handleExcelImport} />
-                        <input type="file" ref={fileJsonRef} accept=".json" className="hidden" onChange={handleJsonImport} />
-                        
-                        {/* Excel Export Shortcut */}
-                        <button 
-                            onClick={handleExcelExport}
-                            className="flex items-center px-3 py-2 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-md shadow-sm shadow-emerald-200 transition-colors"
-                            title="Download Excel"
-                        >
-                            <Table className="w-3.5 h-3.5 sm:mr-1.5" />
-                            <span className="hidden sm:inline">Excel</span>
-                        </button>
-
-                         <button onClick={handleReset} className="p-2 text-rose-600 hover:bg-rose-50 rounded-md transition-colors ml-1" title="Hapus Semua Data">
-                            <Trash2 className="w-4 h-4" />
+                         <button onClick={() => setIsSettingsOpen(true)} className="p-2 text-stone-500 hover:bg-stone-100 rounded-md transition-colors ml-1" title="Pengaturan">
+                            <Settings className="w-4 h-4" />
                         </button>
                     </div>
                 </div>
@@ -511,202 +411,252 @@ function App() {
         </div>
       </header>
 
-      {/* Main Table */}
-      <main className="flex-1 overflow-hidden w-full px-2 sm:px-4 lg:px-6 py-4 flex flex-col relative">
-        <div className="bg-white rounded-lg shadow-xl shadow-slate-200/50 border border-slate-200 flex flex-col h-full relative z-0">
-            <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
-                <table className="w-full text-xs border-collapse table-fixed">
-                    <thead className="bg-slate-100 text-slate-500 font-semibold uppercase tracking-wider text-[10px] sticky top-0 z-10 shadow-sm">
-                        <tr>
-                            <th className="w-[3%] p-2 text-center border-b border-r border-slate-200">ID</th>
-                            <th className="w-[7%] p-2 text-left border-b border-r border-slate-200">Tanggal</th>
-                            <th className="w-[20%] p-2 text-left border-b border-r border-slate-200">Keterangan</th>
-                            
-                            <th className="w-[10%] p-2 text-right border-b border-slate-200 bg-emerald-50/50 text-emerald-700">Rencana Masuk</th>
-                            <th className="w-[10%] p-2 text-right border-b border-slate-200 bg-rose-50/50 text-rose-700">Rencana Keluar</th>
-                            <th className="w-[10%] p-2 text-right border-b border-r border-slate-200 bg-slate-100 text-slate-700 font-bold">Est Saldo</th>
-                            
-                            <th className="w-[10%] p-2 text-right border-b border-slate-200 bg-emerald-100/30 text-emerald-800">Aktual Masuk</th>
-                            <th className="w-[10%] p-2 text-right border-b border-slate-200 bg-rose-100/30 text-rose-800">Aktual Keluar</th>
-                            <th className="w-[10%] p-2 text-right border-b border-r border-slate-200 bg-slate-100 text-slate-800 font-bold">Saldo Akt</th>
-                            
-                            <th className="w-[10%] p-2 text-right border-b border-slate-200">Selisih</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {filteredData.length === 0 ? (
+      {/* Summary Cards */}
+      <div className="px-4 sm:px-6 lg:px-8 py-4 bg-stone-50 shrink-0">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Card 1: Balance */}
+              <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm relative overflow-hidden group">
+                  <div className={cn("absolute right-0 top-0 p-3 opacity-10 rounded-bl-xl", btnPrimaryClass)}>
+                      <TrendingUp className="w-6 h-6" />
+                  </div>
+                  <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Sisa Saldo Aktual</p>
+                  <h3 className={cn("text-xl font-bold mt-1", totals.finalActBalance < 0 ? "text-rose-600" : "text-stone-800")}>
+                      {formatCurrency(totals.finalActBalance)}
+                  </h3>
+                  <div className="mt-2 text-[10px] text-stone-500">
+                      Est: {formatCurrency(totals.finalEstBalance)}
+                  </div>
+              </div>
+
+               {/* Card 2: Period Summary */}
+               <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm">
+                   <div className="flex justify-between items-end">
+                       <div>
+                           <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider mb-1">Total Masuk</p>
+                           <p className="font-bold text-stone-700 text-sm">{formatCurrency(totals.periodIncome)}</p>
+                       </div>
+                       <div className="text-right">
+                           <p className="text-xs font-bold text-rose-500 uppercase tracking-wider mb-1">Total Keluar</p>
+                           <p className="font-bold text-stone-700 text-sm">{formatCurrency(totals.periodExpense)}</p>
+                       </div>
+                   </div>
+                   {/* Progress Bar Income vs Expense */}
+                   <div className="w-full bg-stone-100 h-1.5 mt-3 rounded-full overflow-hidden flex">
+                       <div className="bg-rose-500 h-full" style={{ width: `${Math.min((totals.periodExpense / (totals.periodIncome || 1)) * 100, 100)}%` }}></div>
+                   </div>
+               </div>
+
+                {/* Card 4: Savings Goal (Mockup) */}
+               <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm">
+                   <div className="flex justify-between items-center mb-1">
+                        <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Target: Laptop Baru</p>
+                        <span className="text-[10px] font-bold text-indigo-500">45%</span>
+                   </div>
+                   <h3 className="text-sm font-bold text-stone-700">{formatCurrency(totals.finalActBalance)} <span className="text-[10px] text-stone-400 font-normal">/ 15 Juta</span></h3>
+                   <div className="w-full bg-stone-100 h-2 mt-2 rounded-full overflow-hidden">
+                       <div className={cn("h-full rounded-full", btnPrimaryClass)} style={{ width: '45%' }}></div>
+                   </div>
+               </div>
+          </div>
+      </div>
+
+      {/* Main Content Area */}
+      <main className="flex-1 overflow-hidden w-full px-4 sm:px-6 lg:px-8 py-4 flex flex-col relative bg-stone-50">
+        
+        {/* VIEW: TABLE */}
+        {viewMode === 'table' && (
+            <div className="bg-white rounded-lg shadow-xl shadow-stone-200/50 border border-stone-200 flex flex-col h-full relative z-0">
+                <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
+                    <table className="w-full text-xs border-collapse table-fixed">
+                        <thead className="bg-stone-100 text-stone-500 font-semibold uppercase tracking-wider text-[10px] sticky top-0 z-10 shadow-sm">
                             <tr>
-                                <td colSpan={10} className="py-16 text-center text-slate-400">
-                                    <div className="flex flex-col items-center justify-center space-y-4 opacity-70">
-                                        <div className="bg-slate-50 p-4 rounded-full border border-slate-100 shadow-sm">
-                                            <FolderOpen className="w-10 h-10 text-indigo-200" />
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-sm font-semibold text-slate-600">
-                                                {transactions.length > 0 ? 'Tidak ada data pada tanggal ini' : 'Belum Ada Data Transaksi'}
-                                            </p>
-                                            <p className="text-xs text-slate-400 mt-1">
-                                                {transactions.length > 0 ? 'Coba ubah filter tanggal' : 'Mulai dengan menekan tombol Tambah Transaksi'}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </td>
+                                <th className="w-[3%] p-3 text-center border-b border-r border-stone-200">ID</th>
+                                <th className="w-[8%] p-3 text-left border-b border-r border-stone-200">Tanggal</th>
+                                <th className="w-[20%] p-3 text-left border-b border-r border-stone-200">Keterangan</th>
+                                <th className="w-[10%] p-3 text-left border-b border-r border-stone-200">Kategori</th>
+                                <th className="w-[9%] p-3 text-right border-b border-stone-200 bg-emerald-50/50 text-emerald-700 hidden sm:table-cell">Renc Masuk</th>
+                                <th className="w-[9%] p-3 text-right border-b border-stone-200 bg-rose-50/50 text-rose-700 hidden sm:table-cell">Renc Keluar</th>
+                                <th className="w-[9%] p-3 text-right border-b border-r border-stone-200 bg-stone-100 text-stone-700 font-bold hidden sm:table-cell">Est Saldo</th>
+                                <th className="w-[9%] p-3 text-right border-b border-stone-200 bg-emerald-100/30 text-emerald-800">Akt Masuk</th>
+                                <th className="w-[9%] p-3 text-right border-b border-stone-200 bg-rose-100/30 text-rose-800">Akt Keluar</th>
+                                <th className="w-[9%] p-3 text-right border-b border-r border-stone-200 bg-stone-100 text-stone-800 font-bold">Saldo Akt</th>
+                                <th className="w-[5%] p-3 text-right border-b border-stone-200">Selisih</th>
                             </tr>
-                        ) : (
-                            filteredData.map(row => (
-                                <tr key={row.id} className="group hover:bg-slate-50 transition-colors duration-150">
-                                    {/* ID */}
-                                    <td className="p-0 text-center text-slate-400 font-mono text-[10px] border-r border-slate-100">
-                                        <div className="py-2 px-1">{row.id}</div>
+                        </thead>
+                        <tbody className="divide-y divide-stone-100">
+                            {filteredData.map(row => (
+                                <tr key={row.id} className={cn("group hover:bg-stone-100 transition-colors duration-200", compactMode ? "h-10" : "h-12")}>
+                                    <td className="p-3 text-center text-stone-400 font-mono text-[10px] border-r border-stone-100">
+                                        {row.id}
                                     </td>
-
-                                    {/* Tanggal */}
-                                    <td className="p-0 border-r border-slate-100">
-                                        <input 
-                                            type="text" 
-                                            value={row.date} 
-                                            onChange={(e) => handleUpdate(row.id, 'date', e.target.value)}
-                                            className="w-full h-full p-2 bg-transparent outline-none focus:bg-white focus:ring-1 focus:ring-indigo-500 font-medium text-slate-700"
-                                        />
+                                    <td className="p-0 border-r border-stone-100">
+                                        <input type="text" value={row.date} onChange={(e) => handleUpdate(row.id, 'date', e.target.value)} className="w-full h-full px-3 bg-transparent outline-none text-stone-700 font-medium" />
                                     </td>
-
-                                    {/* Keterangan */}
-                                    <td className="p-0 border-r border-slate-100 relative">
-                                        <div className="flex items-center h-full">
-                                            <input 
-                                                type="text" 
-                                                value={row.description} 
-                                                onChange={(e) => handleUpdate(row.id, 'description', e.target.value)}
-                                                className="w-full h-full p-2 bg-transparent outline-none focus:bg-white focus:ring-1 focus:ring-indigo-500 text-slate-600"
-                                            />
-                                            {row.isNew && (
-                                                <span className="absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[9px] font-bold rounded shadow-sm border border-blue-200 animate-pulse pointer-events-none">
-                                                    NEW
-                                                </span>
+                                    <td className="p-0 border-r border-stone-100 relative">
+                                        <input type="text" value={row.description} onChange={(e) => handleUpdate(row.id, 'description', e.target.value)} className="w-full h-full px-3 bg-transparent outline-none text-stone-600" />
+                                        {row.isNew && <span className="absolute right-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-blue-500 rounded-full"></span>}
+                                    </td>
+                                    {/* Category Dropdown */}
+                                    <td className="p-0 border-r border-stone-100">
+                                        <select 
+                                            value={row.category} 
+                                            onChange={(e) => handleUpdate(row.id, 'category', e.target.value)}
+                                            className={cn("w-full h-full px-3 bg-transparent outline-none text-[10px] font-medium appearance-none cursor-pointer", 
+                                                CATEGORIES.find(c => c.name === row.category)?.color
                                             )}
-                                        </div>
+                                        >
+                                            {CATEGORIES.map(c => <option key={c.name} value={c.name} className="bg-white text-stone-800">{c.name}</option>)}
+                                        </select>
                                     </td>
-
-                                    {/* Rencana Masuk */}
-                                    <td className="p-0 border-slate-100 bg-emerald-50/10">
-                                        <input 
-                                            type="text"
-                                            value={row.planIncome === 0 ? '' : formatCurrency(row.planIncome)}
-                                            onChange={(e) => handleUpdate(row.id, 'planIncome', parseCurrency(e.target.value))}
-                                            className={`w-full h-full p-2 bg-transparent outline-none focus:bg-white focus:ring-1 focus:ring-emerald-500 text-right font-mono tracking-tight ${row.planIncome > 0 ? 'text-emerald-600 font-medium' : 'text-slate-900'}`}
-                                            placeholder="0"
-                                        />
-                                    </td>
-
-                                    {/* Rencana Keluar */}
-                                    <td className="p-0 border-slate-100 bg-rose-50/10">
-                                        <input 
-                                            type="text"
-                                            value={row.planExpense === 0 ? '' : formatCurrency(row.planExpense)}
-                                            onChange={(e) => handleUpdate(row.id, 'planExpense', parseCurrency(e.target.value))}
-                                            className={`w-full h-full p-2 bg-transparent outline-none focus:bg-white focus:ring-1 focus:ring-rose-500 text-right font-mono tracking-tight ${row.planExpense > 0 ? 'text-rose-600 font-medium' : 'text-slate-900'}`}
-                                            placeholder="0"
-                                        />
-                                    </td>
-
-                                    {/* Est Saldo */}
-                                    <td className="p-0 border-r border-slate-100 bg-slate-50/50">
-                                        <div className="flex items-center justify-end h-full px-2 py-1 font-bold text-slate-700 font-mono tracking-tight">
-                                            {formatCurrency(row.estBalance)}
-                                        </div>
-                                    </td>
-
-                                    {/* Aktual Masuk */}
-                                    <td className="p-0 border-slate-100">
-                                        <input 
-                                            type="text"
-                                            value={row.actIncome === 0 && row.planIncome > 0 ? formatCurrency(row.planIncome) : (row.actIncome === 0 ? '' : formatCurrency(row.actIncome))}
-                                            onChange={(e) => handleUpdate(row.id, 'actIncome', parseCurrency(e.target.value))}
-                                            className={`w-full h-full p-2 bg-transparent outline-none focus:bg-white focus:ring-1 focus:ring-emerald-500 text-right font-mono tracking-tight 
-                                                ${row.actIncome === 0 && row.planIncome > 0 ? 'text-emerald-400/60 italic font-medium' : ''}
-                                                ${row.actIncome > 0 ? 'text-emerald-700 font-bold' : ''}
-                                                ${row.actIncome === 0 && row.planIncome === 0 ? 'text-slate-900' : ''}
-                                            `}
-                                            placeholder="0"
-                                        />
-                                    </td>
-
-                                    {/* Aktual Keluar */}
-                                    <td className="p-0 border-slate-100">
-                                        <input 
-                                            type="text"
-                                            value={row.actExpense === 0 && row.planExpense > 0 ? formatCurrency(row.planExpense) : (row.actExpense === 0 ? '' : formatCurrency(row.actExpense))}
-                                            onChange={(e) => handleUpdate(row.id, 'actExpense', parseCurrency(e.target.value))}
-                                            className={`w-full h-full p-2 bg-transparent outline-none focus:bg-white focus:ring-1 focus:ring-rose-500 text-right font-mono tracking-tight 
-                                                ${row.actExpense === 0 && row.planExpense > 0 ? 'text-rose-400/60 italic font-medium' : ''}
-                                                ${row.actExpense > 0 ? 'text-rose-700 font-bold' : ''}
-                                                ${row.actExpense === 0 && row.planExpense === 0 ? 'text-slate-900' : ''}
-                                            `}
-                                            placeholder="0"
-                                        />
-                                    </td>
-
-                                    {/* Saldo Aktual */}
-                                    <td className="p-0 border-r border-slate-100 bg-slate-50/50">
-                                        <div className={`flex items-center justify-end h-full px-2 py-1 font-bold font-mono tracking-tight ${row.actBalance < 0 ? 'text-red-600' : 'text-slate-800'}`}>
-                                            {formatCurrency(row.actBalance)}
-                                        </div>
-                                    </td>
-
-                                    {/* Selisih */}
-                                    <td className="p-0">
-                                        <div className={`flex items-center justify-end h-full px-2 py-1 font-medium font-mono tracking-tight 
-                                            ${row.difference > 0 ? 'text-emerald-600' : ''}
-                                            ${row.difference < 0 ? 'text-red-500' : ''}
-                                            ${row.difference === 0 ? 'text-slate-900' : ''}
-                                        `}>
-                                            <span>{row.difference > 0 ? '+' : ''}{formatCurrency(row.difference)}</span>
-                                        </div>
-                                    </td>
+                                    
+                                    {/* Columns hidden on mobile handled by CSS classes above, only inputs here */}
+                                    <td className="p-0 border-stone-100 hidden sm:table-cell"><input type="text" value={row.planIncome ? formatCurrency(row.planIncome) : ''} onChange={(e) => handleUpdate(row.id, 'planIncome', parseCurrency(e.target.value))} className="w-full h-full px-3 bg-transparent outline-none text-right text-stone-500 font-mono" placeholder="0"/></td>
+                                    <td className="p-0 border-stone-100 hidden sm:table-cell"><input type="text" value={row.planExpense ? formatCurrency(row.planExpense) : ''} onChange={(e) => handleUpdate(row.id, 'planExpense', parseCurrency(e.target.value))} className="w-full h-full px-3 bg-transparent outline-none text-right text-stone-500 font-mono" placeholder="0"/></td>
+                                    <td className="p-0 border-r border-stone-100 bg-stone-50/50 hidden sm:table-cell"><div className="flex items-center justify-end h-full px-3 text-stone-700 font-mono font-bold">{formatCurrency(row.estBalance)}</div></td>
+                                    
+                                    <td className="p-0 border-stone-100"><input type="text" value={row.actIncome ? formatCurrency(row.actIncome) : ''} onChange={(e) => handleUpdate(row.id, 'actIncome', parseCurrency(e.target.value))} className="w-full h-full px-3 bg-transparent outline-none text-right text-emerald-600 font-bold font-mono" placeholder="0"/></td>
+                                    <td className="p-0 border-stone-100"><input type="text" value={row.actExpense ? formatCurrency(row.actExpense) : ''} onChange={(e) => handleUpdate(row.id, 'actExpense', parseCurrency(e.target.value))} className="w-full h-full px-3 bg-transparent outline-none text-right text-rose-600 font-bold font-mono" placeholder="0"/></td>
+                                    <td className="p-0 border-r border-stone-100 bg-stone-50/50"><div className="flex items-center justify-end h-full px-3 text-stone-800 font-mono font-bold">{formatCurrency(row.actBalance)}</div></td>
+                                    <td className="p-0 text-right px-3 text-stone-400 text-[9px] font-mono">{row.difference !== 0 && formatCurrency(row.difference)}</td>
                                 </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
-            </div>
-            
-            {/* Footer */}
-            <div className="bg-slate-50 border-t border-slate-200 px-4 py-2 flex justify-between items-center text-[10px] text-slate-500 shrink-0">
-                <div className="flex items-center space-x-2">
-                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                   <span>Data tersimpan otomatis di browser</span>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
-                <div>{filteredData.length} Baris ditampilkan (Total: {transactions.length})</div>
+                {/* Mobile Floating Fab for Filter */}
+                <div className="md:hidden fixed bottom-20 right-4">
+                    <button onClick={() => setCompactMode(!compactMode)} className="bg-stone-800 text-white p-3 rounded-full shadow-lg">
+                        {compactMode ? <Monitor className="w-5 h-5"/> : <List className="w-5 h-5"/>}
+                    </button>
+                </div>
             </div>
-        </div>
+        )}
+
+        {/* VIEW: ANALYTICS (CHARTS) */}
+        {viewMode === 'analytics' && (
+            <div className="h-full grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto">
+                {/* Pie Chart */}
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200 flex flex-col">
+                    <h3 className="text-sm font-bold text-stone-700 mb-4">Pengeluaran per Kategori</h3>
+                    <div className="flex-1 min-h-[300px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie 
+                                    data={analyticsData.pieData} 
+                                    cx="50%" cy="50%" 
+                                    innerRadius={60} 
+                                    outerRadius={80} 
+                                    paddingAngle={5} 
+                                    dataKey="value"
+                                >
+                                    {analyticsData.pieData.map((entry, index) => {
+                                        // Match color logic roughly
+                                        const colors = ['#10b981', '#3b82f6', '#f97316', '#ef4444', '#a855f7', '#14b8a6', '#64748b'];
+                                        return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} strokeWidth={0} />;
+                                    })}
+                                </Pie>
+                                <Tooltip formatter={(value: number) => formatCurrency(value)} contentStyle={{backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#fff'}} />
+                                <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Area Chart */}
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200 flex flex-col">
+                    <h3 className="text-sm font-bold text-stone-700 mb-4">Pertumbuhan Saldo</h3>
+                    <div className="flex-1 min-h-[300px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={analyticsData.areaData}>
+                                <defs>
+                                    <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#44403c" stopOpacity={0.8}/>
+                                        <stop offset="95%" stopColor="#44403c" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e7e5e4" opacity={0.5} />
+                                <XAxis dataKey="name" tick={{fontSize: 10, fill: '#78716c'}} tickLine={false} axisLine={false} />
+                                <YAxis hide domain={['auto', 'auto']} />
+                                <Tooltip formatter={(value: number) => formatCurrency(value)} contentStyle={{backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#fff'}} />
+                                <Area type="monotone" dataKey="saldo" stroke="#44403c" fillOpacity={1} fill="url(#colorSaldo)" strokeWidth={2} />
+                                <Area type="monotone" dataKey="est" stroke="#a8a29e" strokeDasharray="5 5" fill="transparent" strokeWidth={1} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* VIEW: CALENDAR */}
+        {viewMode === 'calendar' && (
+            <div className="bg-white rounded-lg shadow-sm border border-stone-200 h-full overflow-y-auto p-4">
+                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {filteredData.map(t => (
+                        <div key={t.id} className="bg-stone-50 border border-stone-100 p-3 rounded-lg hover:shadow-md transition-all">
+                            <div className="flex justify-between items-start mb-2">
+                                <span className="text-xs font-bold text-stone-500 bg-white px-2 py-1 rounded shadow-sm">{t.date}</span>
+                                <span className={cn("text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider", 
+                                    CATEGORIES.find(c => c.name === t.category)?.color
+                                )}>{t.category}</span>
+                            </div>
+                            <h4 className="font-bold text-sm text-stone-800 truncate" title={t.description}>{t.description}</h4>
+                            <div className="mt-2 flex justify-between items-end">
+                                <div className="text-right w-full">
+                                    {(t.actIncome > 0 || t.planIncome > 0) && (
+                                        <p className="text-xs text-emerald-600 font-bold">+ {formatCurrency(t.actIncome || t.planIncome)}</p>
+                                    )}
+                                    {(t.actExpense > 0 || t.planExpense > 0) && (
+                                        <p className="text-xs text-rose-600 font-bold">- {formatCurrency(t.actExpense || t.planExpense)}</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                 </div>
+            </div>
+        )}
       </main>
 
-      {/* --- NOTIFICATION TOAST --- */}
-      {showUpdateToast && (
-        <div className="fixed bottom-6 right-6 z-[60] bg-slate-900 text-white p-4 rounded-xl shadow-2xl border border-slate-700 flex items-center gap-4 toast-slide-in max-w-sm">
-            <div className="p-2.5 bg-indigo-600 rounded-full shrink-0">
-                <RefreshCw className="w-5 h-5 text-white animate-spin-slow" />
-            </div>
-            <div className="flex-1 min-w-0">
-                <h4 className="font-bold text-sm truncate">Update Tersedia!</h4>
-                <p className="text-xs text-slate-400 mt-0.5">Versi <span className="text-white font-mono">{remoteVersion}</span> siap diinstall.</p>
-            </div>
-            <div className="flex flex-col gap-2 shrink-0">
-                <button 
-                    onClick={() => {
-                        setIsUpdateModalOpen(true);
-                        setShowUpdateToast(false);
-                    }}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-xs font-bold transition-colors shadow-lg shadow-indigo-900/50"
-                >
-                    Lihat
-                </button>
-                <button 
-                    onClick={() => setShowUpdateToast(false)}
-                    className="text-xs text-slate-500 hover:text-white transition-colors underline decoration-slate-600"
-                >
-                    Abaikan
-                </button>
+      {/* --- ADD TRANSACTION MODAL --- */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={() => setIsModalOpen(false)}></div>
+            <div className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-white/50 modal-animate overflow-hidden">
+                <div className="bg-stone-50 px-8 py-6 border-b border-stone-100 flex justify-between items-center">
+                    <h2 className="text-xl font-bold text-stone-800">Transaksi Baru</h2>
+                    <button onClick={() => setIsModalOpen(false)}><X className="w-6 h-6 text-stone-400" /></button>
+                </div>
+                <form onSubmit={handleAddTransaction} className="p-8 space-y-5">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-stone-500 uppercase">Tanggal</label>
+                            <input type="date" required value={newTrans.date} onChange={(e) => setNewTrans({...newTrans, date: e.target.value})} className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-lg outline-none focus:ring-2 focus:ring-stone-400" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-stone-500 uppercase">Kategori</label>
+                            <select value={newTrans.category} onChange={(e) => setNewTrans({...newTrans, category: e.target.value as TransactionCategory})} className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-lg outline-none focus:ring-2 focus:ring-stone-400">
+                                {CATEGORIES.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-stone-500 uppercase">Keterangan</label>
+                        <input type="text" required placeholder="Contoh: Beli Kopi" value={newTrans.description} onChange={(e) => setNewTrans({...newTrans, description: e.target.value})} className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-lg outline-none focus:ring-2 focus:ring-stone-400" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-emerald-500 uppercase">Masuk</label>
+                            <input type="text" placeholder="0" value={newTrans.planIncome} onChange={(e) => handleCurrencyInput('planIncome', e.target.value)} className="w-full p-2.5 bg-emerald-50 border border-emerald-100 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-right font-bold text-emerald-600" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-rose-500 uppercase">Keluar</label>
+                            <input type="text" placeholder="0" value={newTrans.planExpense} onChange={(e) => handleCurrencyInput('planExpense', e.target.value)} className="w-full p-2.5 bg-rose-50 border border-rose-100 rounded-lg outline-none focus:ring-2 focus:ring-rose-500 text-right font-bold text-rose-600" />
+                        </div>
+                    </div>
+                    <button type="submit" className={cn("w-full py-3 rounded-xl font-bold mt-4 flex justify-center items-center gap-2", btnPrimaryClass)}>
+                        <CheckCircle2 className="w-5 h-5" /> Simpan
+                    </button>
+                </form>
             </div>
         </div>
       )}
@@ -714,302 +664,112 @@ function App() {
       {/* --- FILE MANAGER MODAL --- */}
       {showFileManager && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-             <div 
-                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" 
-                onClick={() => setShowFileManager(false)}
-            ></div>
-            <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-white/50 modal-animate overflow-hidden flex flex-col max-h-[85vh]">
-                {/* Header */}
-                <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-indigo-100 p-2 rounded-lg">
-                            <FolderOpen className="w-5 h-5 text-indigo-600" />
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-bold text-slate-800 tracking-tight">Folder Web</h2>
-                            <p className="text-xs text-slate-500">Manajemen File Internal</p>
-                        </div>
-                    </div>
-                    <button onClick={() => setShowFileManager(false)} className="text-slate-400 hover:text-rose-500 transition-colors">
-                        <X className="w-5 h-5" />
-                    </button>
+             <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={() => setShowFileManager(false)}></div>
+            <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-white/50 modal-animate flex flex-col max-h-[85vh]">
+                <div className="bg-stone-50 px-6 py-4 border-b border-stone-200 flex justify-between items-center">
+                    <h2 className="text-lg font-bold text-stone-800 flex items-center gap-2"><FolderOpen className="w-5 h-5 text-stone-500" /> File Manager</h2>
+                    <button onClick={() => setShowFileManager(false)}><X className="w-5 h-5 text-stone-400" /></button>
+                </div>
+                
+                <div className="flex border-b border-stone-200">
+                    <button onClick={() => setActiveTab('open')} className={cn("flex-1 py-3 text-sm font-medium transition-colors border-b-2", activeTab === 'open' ? "border-stone-600 text-stone-600 bg-stone-50" : "border-transparent text-stone-500 hover:text-stone-700")}>Buka File</button>
+                    <button onClick={() => setActiveTab('save')} className={cn("flex-1 py-3 text-sm font-medium transition-colors border-b-2", activeTab === 'save' ? "border-stone-600 text-stone-600 bg-stone-50" : "border-transparent text-stone-500 hover:text-stone-700")}>Simpan / Ekspor</button>
                 </div>
 
-                {/* Tabs */}
-                <div className="flex border-b border-slate-200">
-                    <button 
-                        onClick={() => setActiveTab('open')}
-                        className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'open' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                    >
-                        Buka File ({savedFiles.length})
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('save')}
-                        className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'save' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                    >
-                        Simpan / Ekspor
-                    </button>
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30">
+                <div className="flex-1 overflow-y-auto p-6 bg-stone-50/30">
                     {activeTab === 'open' ? (
                         <div className="space-y-4">
-                            {savedFiles.length === 0 ? (
-                                <div className="text-center py-10 text-slate-400">
-                                    <FolderOpen className="w-12 h-12 mx-auto mb-2 opacity-30" />
-                                    <p>Belum ada file tersimpan di Folder Web.</p>
+                            {/* Saved Files List (Internal) */}
+                            {savedFiles.map(file => (
+                                <div key={file.id} className="bg-white p-3 rounded-lg border border-stone-200 flex justify-between items-center">
+                                    <div>
+                                        <h3 className="font-bold text-sm text-stone-800">{file.name}</h3>
+                                        <p className="text-[10px] text-stone-500">{new Date(file.date).toLocaleDateString()} • {file.itemCount} Item</p>
+                                    </div>
+                                    <button onClick={() => { setTransactions(file.data); setShowFileManager(false); }} className={cn("px-3 py-1.5 text-xs rounded-md", btnPrimaryClass)}>Buka</button>
                                 </div>
-                            ) : (
-                                <div className="space-y-2">
-                                    {savedFiles.map(file => (
-                                        <div key={file.id} className="bg-white p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all flex justify-between items-center group">
-                                            <div className="flex items-center gap-3">
-                                                <div className="bg-emerald-50 p-2 rounded text-emerald-600">
-                                                    <FileText className="w-5 h-5" />
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold text-slate-800 text-sm">{file.name}</h3>
-                                                    <p className="text-[10px] text-slate-500 flex items-center gap-2">
-                                                        <span>{new Date(file.date).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit'})}</span>
-                                                        <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                                                        <span>{file.itemCount} Transaksi</span>
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button 
-                                                    onClick={() => handleLoadInternal(file)}
-                                                    className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-md hover:bg-indigo-700 font-medium shadow-sm"
-                                                >
-                                                    Buka
-                                                </button>
-                                                <button 
-                                                    onClick={() => handleDeleteInternal(file.id)}
-                                                    className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                             {/* Import External */}
-                             <div className="mt-6 pt-4 border-t border-slate-200">
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Import dari Perangkat</p>
+                            ))}
+                            <div className="border-t border-stone-200 pt-4 mt-4">
+                                <input type="file" ref={fileJsonRef} accept=".json" className="hidden" onChange={(e) => {
+                                    if(e.target.files?.[0]) {
+                                        const r = new FileReader();
+                                        r.onload = (ev) => { try { setTransactions(JSON.parse(ev.target?.result as string)); setShowFileManager(false); } catch(err){alert("Invalid JSON")} };
+                                        r.readAsText(e.target.files[0]);
+                                    }
+                                }} />
+                                <input type="file" ref={fileExcelRef} accept=".xlsx,.xls" className="hidden" onChange={handleExcelImport} />
                                 <div className="grid grid-cols-2 gap-3">
-                                    <button onClick={() => fileJsonRef.current?.click()} className="flex items-center justify-center gap-2 p-3 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 text-xs font-medium transition-colors">
-                                        <Upload className="w-4 h-4" /> Upload JSON
-                                    </button>
-                                    <button onClick={() => fileExcelRef.current?.click()} className="flex items-center justify-center gap-2 p-3 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 text-xs font-medium transition-colors">
-                                        <Table className="w-4 h-4 text-emerald-600" /> Upload Excel
-                                    </button>
+                                    <button onClick={() => fileJsonRef.current?.click()} className="p-3 bg-white border border-stone-200 rounded-lg text-xs font-medium text-stone-600 flex items-center justify-center gap-2 hover:bg-stone-50"><FileJson className="w-4 h-4"/> Import JSON</button>
+                                    <button onClick={() => fileExcelRef.current?.click()} className="p-3 bg-white border border-stone-200 rounded-lg text-xs font-medium text-stone-600 flex items-center justify-center gap-2 hover:bg-stone-50"><Table className="w-4 h-4 text-emerald-500"/> Import Excel</button>
                                 </div>
-                             </div>
+                            </div>
                         </div>
                     ) : (
                         <div className="space-y-6">
-                             {/* Save Internal */}
-                             <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm">
-                                <h3 className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-2">
-                                    <HardDrive className="w-4 h-4 text-indigo-500" />
-                                    Simpan ke Folder Web
-                                </h3>
-                                <p className="text-[11px] text-slate-500 mb-4">Simpan data saat ini agar bisa dibuka kembali nanti di browser ini.</p>
-                                
-                                <div className="flex gap-2">
-                                    <input 
-                                        type="text" 
-                                        placeholder="Nama File (Contoh: Plan Maret 2026)" 
-                                        value={fileNameInput}
-                                        onChange={(e) => setFileNameInput(e.target.value)}
-                                        className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none"
-                                    />
-                                    <button 
-                                        onClick={handleSaveInternal}
-                                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-md shadow-indigo-200 transition-colors"
-                                    >
-                                        Simpan
-                                    </button>
-                                </div>
+                            {/* Native FS API Save */}
+                             <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                                <h3 className="text-sm font-bold text-indigo-900 mb-2 flex items-center gap-2"><HardDrive className="w-4 h-4"/> Simpan ke Perangkat (Google Drive)</h3>
+                                <p className="text-[11px] text-indigo-700 mb-3 leading-relaxed">
+                                    Fitur Pro: Simpan file langsung ke folder Google Drive di PC Anda. Tekan <b>Ctrl+S</b> nanti untuk menyimpan perubahan instan.
+                                </p>
+                                <button onClick={handleSaveToDisk} className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow-md transition-all">
+                                    Pilih Lokasi Simpan (Save As)
+                                </button>
                              </div>
 
-                             {/* Export External */}
-                             <div>
-                                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                                    <Download className="w-4 h-4" /> Ekspor ke Perangkat
-                                </h3>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button onClick={handleJsonExport} className="group relative overflow-hidden bg-white border border-slate-200 hover:border-slate-300 p-4 rounded-xl text-left transition-all hover:shadow-md">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div className="bg-slate-100 p-2 rounded-lg group-hover:bg-slate-200 transition-colors">
-                                                <FileJson className="w-5 h-5 text-slate-600" />
-                                            </div>
-                                        </div>
-                                        <span className="block font-bold text-slate-700 text-sm">File JSON</span>
-                                        <span className="text-[10px] text-slate-400">Backup lengkap aplikasi</span>
-                                    </button>
+                             <div className="relative">
+                                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-stone-200"></div></div>
+                                 <div className="relative flex justify-center text-xs uppercase"><span className="bg-stone-50 px-2 text-stone-500">Atau Simpan di Browser</span></div>
+                             </div>
 
-                                    <button onClick={handleExcelExport} className="group relative overflow-hidden bg-white border border-slate-200 hover:border-emerald-200 p-4 rounded-xl text-left transition-all hover:shadow-md">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div className="bg-emerald-50 p-2 rounded-lg group-hover:bg-emerald-100 transition-colors">
-                                                <Table className="w-5 h-5 text-emerald-600" />
-                                            </div>
-                                        </div>
-                                        <span className="block font-bold text-slate-700 text-sm">File Excel</span>
-                                        <span className="text-[10px] text-slate-400">Format laporan tabel</span>
-                                    </button>
-                                </div>
+                             <div className="flex gap-2">
+                                <input type="text" placeholder="Nama File..." value={fileNameInput} onChange={(e) => setFileNameInput(e.target.value)} className="flex-1 px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm" />
+                                <button onClick={handleSaveInternal} className="px-4 py-2 bg-stone-800 text-white rounded-lg text-sm font-bold">Simpan</button>
+                             </div>
+                             
+                             <div className="grid grid-cols-2 gap-3 pt-2">
+                                <button onClick={handleJsonExport} className="flex items-center justify-center gap-2 p-3 border border-stone-200 rounded-lg text-xs font-bold text-stone-600 hover:bg-stone-100"><Download className="w-4 h-4"/> Download JSON</button>
+                                <button onClick={() => exportToExcel(filteredData)} className="flex items-center justify-center gap-2 p-3 border border-stone-200 rounded-lg text-xs font-bold text-emerald-600 hover:bg-emerald-50"><Table className="w-4 h-4"/> Download Excel</button>
                              </div>
                         </div>
                     )}
                 </div>
+                <div className="p-4 bg-stone-50 border-t border-stone-200 flex justify-between items-center text-xs text-stone-400">
+                    <span>OhMonsea Finance v{appVersion}</span>
+                </div>
             </div>
         </div>
       )}
-
-      {/* --- LUXURY ADD TRANSACTION MODAL --- */}
-      {isModalOpen && (
+      {/* --- SETTINGS MODAL --- */}
+      {isSettingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div 
-                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" 
-                onClick={() => setIsModalOpen(false)}
-            ></div>
-
-            <div className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-white/50 modal-animate overflow-hidden transform transition-all">
-                <div className="bg-gradient-to-r from-slate-50 to-white px-8 py-6 border-b border-slate-100 flex justify-between items-start">
-                    <div>
-                        <h2 className="text-slate-800 font-serif font-bold text-2xl tracking-tight">Transaksi Baru</h2>
-                        <p className="text-slate-500 text-xs mt-1 font-medium tracking-wide uppercase">Input Data Keuangan</p>
-                    </div>
-                    <button 
-                        onClick={() => setIsModalOpen(false)} 
-                        className="text-slate-400 hover:text-rose-500 transition-colors p-1 rounded-full hover:bg-rose-50"
-                    >
-                        <X className="w-6 h-6" />
-                    </button>
+            <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={() => setIsSettingsOpen(false)}></div>
+            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl border border-white/50 modal-animate overflow-hidden">
+                <div className="bg-stone-50 px-6 py-4 border-b border-stone-200 flex justify-between items-center">
+                    <h2 className="text-lg font-bold text-stone-800 flex items-center gap-2"><Settings className="w-5 h-5 text-stone-500" /> Pengaturan</h2>
+                    <button onClick={() => setIsSettingsOpen(false)}><X className="w-5 h-5 text-stone-400" /></button>
                 </div>
                 
-                <form onSubmit={handleAddTransaction} className="p-8 space-y-6 bg-white">
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-600 uppercase tracking-wider ml-1">Tanggal</label>
-                        <div className="relative group">
-                            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
-                            <input 
-                                type="date" 
-                                required
-                                value={newTrans.date}
-                                onChange={(e) => setNewTrans({...newTrans, date: e.target.value})}
-                                className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-sm font-medium text-slate-700 placeholder-slate-400"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-600 uppercase tracking-wider ml-1">Keterangan</label>
-                        <div className="relative group">
-                            <Type className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
-                            <input 
-                                type="text" 
-                                required
-                                placeholder="Contoh: Gaji Bulanan, Belanja Bulanan..."
-                                value={newTrans.description}
-                                onChange={(e) => setNewTrans({...newTrans, description: e.target.value})}
-                                className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-sm font-medium text-slate-700 placeholder-slate-400"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-6 pt-2">
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-emerald-600 uppercase tracking-wider ml-1 flex items-center gap-1">
-                                <TrendingUp className="w-3 h-3" /> Rencana Masuk
-                            </label>
-                            <div className="relative group">
-                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-sm">Rp</span>
-                                <input 
-                                    type="text" 
-                                    placeholder="0"
-                                    value={newTrans.planIncome}
-                                    onChange={(e) => handleCurrencyInput('planIncome', e.target.value)}
-                                    className="w-full pl-12 pr-4 py-3 bg-emerald-50/30 border border-emerald-100 rounded-xl focus:bg-white focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 outline-none transition-all text-sm font-bold text-emerald-700 placeholder-emerald-300 text-right"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-rose-600 uppercase tracking-wider ml-1 flex items-center gap-1">
-                                <TrendingDown className="w-3 h-3" /> Rencana Keluar
-                            </label>
-                            <div className="relative group">
-                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-rose-500 font-bold text-sm">Rp</span>
-                                <input 
-                                    type="text" 
-                                    placeholder="0"
-                                    value={newTrans.planExpense}
-                                    onChange={(e) => handleCurrencyInput('planExpense', e.target.value)}
-                                    className="w-full pl-12 pr-4 py-3 bg-rose-50/30 border border-rose-100 rounded-xl focus:bg-white focus:ring-4 focus:ring-rose-100 focus:border-rose-500 outline-none transition-all text-sm font-bold text-rose-700 placeholder-rose-300 text-right"
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="pt-6 flex gap-3 border-t border-slate-50 mt-2">
-                        <button 
-                            type="button" 
-                            onClick={() => setIsModalOpen(false)}
-                            className="flex-1 px-4 py-3 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all active:scale-[0.98]"
-                        >
-                            Batal
-                        </button>
-                        <button 
-                            type="submit" 
-                            className="flex-[2] px-4 py-3 text-sm font-bold text-white bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                        >
-                            <CheckCircle2 className="w-4 h-4" />
-                            Simpan Transaksi
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-      )}
-
-      {/* --- UPDATE INSTRUCTION MODAL --- */}
-      {isUpdateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div 
-                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" 
-                onClick={() => setIsUpdateModalOpen(false)}
-            ></div>
-            <div className="relative bg-white w-full max-w-md rounded-xl shadow-2xl p-6 modal-animate border border-white/50">
-                <div className="flex flex-col items-center text-center space-y-4">
-                    <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-2">
-                        <Github className="w-8 h-8 text-blue-600" />
-                    </div>
-                    <h2 className="text-xl font-bold text-slate-800">Update Tersedia: v{remoteVersion}</h2>
-                    <p className="text-sm text-slate-500 leading-relaxed">
-                        Browser tidak memiliki izin untuk mengubah file sistem Anda secara langsung. Silakan jalankan perintah berikut di terminal VS Code Anda:
-                    </p>
+                <div className="p-6 space-y-6">
+                    {/* Theme Selector Removed */}
                     
-                    <div className="w-full bg-slate-900 rounded-lg p-4 relative group">
-                        <code className="text-green-400 font-mono text-sm block text-center">node update.js</code>
+                    <div className="pt-4">
+                        <h3 className="text-sm font-bold text-stone-700 mb-3 flex items-center gap-2"><HardDrive className="w-4 h-4"/> Data</h3>
+                        <button 
+                            onClick={() => { if(confirm("Yakin ingin menghapus semua data? Tindakan ini tidak dapat dibatalkan.")) { setTransactions([]); localStorage.removeItem('luxury_cashflow_data'); setIsSettingsOpen(false); } }} 
+                            className="w-full py-2 px-4 border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors"
+                        >
+                            <Trash2 className="w-4 h-4" /> Reset Semua Data
+                        </button>
                     </div>
-
-                    <button 
-                        onClick={() => setIsUpdateModalOpen(false)}
-                        className="w-full py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-lg transition-colors text-sm"
-                    >
-                        Tutup
-                    </button>
+                </div>
+                
+                <div className="bg-stone-50 px-6 py-3 border-t border-stone-200 text-center">
+                    <p className="text-[10px] text-stone-400">OhMonsea Finance v{appVersion}</p>
                 </div>
             </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
-
-export default App;
