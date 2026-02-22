@@ -169,12 +169,22 @@ export function App() {
 
     // 1. Search Filter
     if (searchQuery) {
-        const lowerQ = searchQuery.toLowerCase();
-        data = data.filter(t => 
-            t.description.toLowerCase().includes(lowerQ) || 
-            t.category.toLowerCase().includes(lowerQ) ||
-            t.date.toLowerCase().includes(lowerQ)
-        );
+        const lowerQ = searchQuery.toLowerCase().trim();
+        if (lowerQ) {
+            data = data.filter(t => 
+                (t.description || '').toLowerCase().includes(lowerQ) || 
+                (t.category || '').toLowerCase().includes(lowerQ) ||
+                (t.date || '').toLowerCase().includes(lowerQ) ||
+                (t.planIncome?.toString() || '').includes(lowerQ) ||
+                (t.planExpense?.toString() || '').includes(lowerQ) ||
+                (t.actIncome?.toString() || '').includes(lowerQ) ||
+                (t.actExpense?.toString() || '').includes(lowerQ) ||
+                formatCurrency(t.planIncome || 0).toLowerCase().includes(lowerQ) ||
+                formatCurrency(t.planExpense || 0).toLowerCase().includes(lowerQ) ||
+                formatCurrency(t.actIncome || 0).toLowerCase().includes(lowerQ) ||
+                formatCurrency(t.actExpense || 0).toLowerCase().includes(lowerQ)
+            );
+        }
     }
 
     // 2. Date Filter
