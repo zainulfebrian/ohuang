@@ -42,9 +42,9 @@ export const exportToExcel = async (data: CalculatedTransaction[]) => {
                 mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             });
             alert('File Excel berhasil disimpan ke folder Download');
-        } catch (err) {
+        } catch (err: any) {
             console.error("Export Excel Error:", err);
-            alert('Gagal mengekspor file Excel di perangkat.');
+            alert('Debug Native Error: ' + (err.message || JSON.stringify(err)));
         }
     } else {
         XLSX.writeFile(workbook, "OhMonsea_Finance_Plan.xlsx");

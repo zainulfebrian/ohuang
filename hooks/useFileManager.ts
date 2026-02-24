@@ -100,8 +100,9 @@ export function useFileManager(
                     mimeType: 'application/json'
                 });
                 showToast('File JSON berhasil disimpan ke folder Download', 'success');
-            } catch (err) {
+            } catch (err: any) {
                 console.error("Export JSON Error:", err);
+                alert('Debug Native Error: ' + (err.message || JSON.stringify(err)));
                 showToast('Gagal mengekspor file di perangkat.', 'error');
             }
             return;

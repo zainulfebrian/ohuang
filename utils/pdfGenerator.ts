@@ -118,9 +118,9 @@ export const generateFinancePDF = async (data: ExportData) => {
                 mimeType: 'application/pdf'
             });
             alert('File PDF berhasil disimpan ke folder Download');
-        } catch (err) {
+        } catch (err: any) {
             console.error("Export PDF Error:", err);
-            alert('Gagal mengekspor Laporan PDF di perangkat.');
+            alert('Debug Native Error: ' + (err.message || JSON.stringify(err)));
         }
     } else {
         doc.save(`OhMonsea_Finance_Report_${new Date().getTime()}.pdf`);
