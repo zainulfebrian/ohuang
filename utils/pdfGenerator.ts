@@ -1,5 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { Capacitor } from '@capacitor/core';
+import NativeDownload from '../src/plugins/NativeDownload';
 import { CalculatedTransaction } from '../types';
 import { formatCurrency } from './formatters';
 
@@ -15,7 +17,7 @@ interface ExportData {
     title?: string;
 }
 
-export const generateFinancePDF = (data: ExportData) => {
+export const generateFinancePDF = async (data: ExportData) => {
     const { transactions, totals, appVersion, title } = data;
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -104,5 +106,23 @@ export const generateFinancePDF = (data: ExportData) => {
         doc.text(`Halaman ${i} dari ${pageCount}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
     }
 
-    doc.save(`OhMonsea_Finance_Report_${new Date().getTime()}.pdf`);
+    if (Capacitor.isNativePlatform()) {
+        try {
+            const dataUri = doc.output('datauristring');
+            const base64Data = dataUri.split(',')[1];
+            const fileName = `OhMonsea_Finance_Report_${new Date().getTime()}.pdf`;
+
+            await NativeDownload.download({
+                filename: fileName,
+                base64Data: base64Data,
+                mimeType: 'application/pdf'
+            });
+            alert('File PDF berhasil disimpan ke folder Download');
+        } catch (err) {
+            console.error("Export PDF Error:", err);
+            alert('Gagal mengekspor Laporan PDF di perangkat.');
+        }
+    } else {
+        doc.save(`OhMonsea_Finance_Report_${new Date().getTime()}.pdf`);
+    }
 };

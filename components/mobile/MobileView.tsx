@@ -4,8 +4,8 @@ import {
     Plus, Trash2, Pencil, Calendar, List, PieChart as PieIcon,
     Target, Settings, Download, Trash, RefreshCcw, TrendingUp,
     LogOut, Database, X, LayoutDashboard, TrendingDown, CheckCircle2,
-    Monitor, ArrowRight, AlertCircle, FolderOpen, Info, AlertTriangle, FileJson,
-    ChevronLeft, ChevronRight, Wallet
+    Monitor, ArrowRight, AlertCircle, Save, Info, AlertTriangle, FileJson,
+    ChevronLeft, ChevronRight, MoreVertical
 } from 'lucide-react';
 import {
     PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area,
@@ -15,6 +15,9 @@ import { Transaction, CalculatedTransaction, TransactionCategory } from '../../t
 import { reverseDateForInput } from '../../utils/formatters';
 import clsx, { type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { AboutView } from '../views/AboutView';
+import { AnalyticsView } from '../views/AnalyticsView';
+import { DateRange } from '../../hooks/useAnalytics';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -30,8 +33,8 @@ interface MobileViewProps {
     onDelete: (id: number) => void;
     onAddRow: (targetId: number, position: 'above' | 'below') => void;
     onAddTransaction: (e: React.FormEvent) => void;
-    viewMode: 'table' | 'calendar' | 'analytics' | 'budget';
-    setViewMode: (mode: 'table' | 'calendar' | 'analytics' | 'budget') => void;
+    viewMode: 'table' | 'calendar' | 'analytics' | 'budget' | 'about';
+    setViewMode: (mode: 'table' | 'calendar' | 'analytics' | 'budget' | 'about') => void;
     searchQuery: string;
     setSearchQuery: (query: string) => void;
     isModalOpen: boolean;
@@ -61,6 +64,8 @@ interface MobileViewProps {
     onUpdateBudget: (category: string, limit: number) => void;
     onExportPDF?: () => void;
     currentMonthYear: string;
+    dateRange: DateRange;
+    setDateRange: (r: DateRange) => void;
 }
 
 export const MobileView: React.FC<MobileViewProps> = ({
@@ -103,11 +108,14 @@ export const MobileView: React.FC<MobileViewProps> = ({
     budgets,
     onUpdateBudget,
     onExportPDF,
-    currentMonthYear
+    currentMonthYear,
+    dateRange,
+    setDateRange,
 }) => {
     const [isSearchOpen, setIsSearchOpen] = React.useState(false);
     const [sortOrder, setSortOrder] = React.useState<'desc' | 'asc'>('desc');
     const [collapsedMonths, setCollapsedMonths] = React.useState<{ [key: string]: boolean }>({});
+    const [exitConfirmOpen, setExitConfirmOpen] = React.useState(false);
 
     // Confirmation & Edit States
     const [confirmModal, setConfirmModal] = React.useState<{
@@ -121,6 +129,33 @@ export const MobileView: React.FC<MobileViewProps> = ({
     const [editMode, setEditMode] = React.useState<number | null>(null);
     const [budgetEditModal, setBudgetEditModal] = React.useState<{ open: boolean; category: string; limit: number }>({ open: false, category: '', limit: 0 });
     const [editBudgetLimit, setEditBudgetLimit] = React.useState('');
+    const [openActionId, setOpenActionId] = React.useState<number | null>(null);
+    const [mobileModalType, setMobileModalType] = React.useState<'income' | 'expense'>('expense');
+
+    // --- Android Hardware Back Button → Exit Confirmation ---
+    React.useEffect(() => {
+        let listenerHandle: { remove: () => void } | null = null;
+        const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+        if (!isNative) return;
+
+        import('@capacitor/app').then(({ App }) => {
+            App.addListener('backButton', ({ canGoBack }) => {
+                if (!canGoBack) {
+                    setExitConfirmOpen(true);
+                }
+            }).then(handle => { listenerHandle = handle; });
+        }).catch(() => { });
+
+        return () => { listenerHandle?.remove(); };
+    }, []);
+
+    React.useEffect(() => {
+        const handleClickOutside = () => setOpenActionId(null);
+        if (openActionId !== null) {
+            document.addEventListener('click', handleClickOutside);
+        }
+        return () => document.removeEventListener('click', handleClickOutside);
+    }, [openActionId]);
 
     const btnPrimaryClass = "text-white shadow-lg transition-all active:scale-[0.98] font-bold bg-stone-800 hover:bg-stone-900 shadow-stone-200";
 
@@ -157,7 +192,7 @@ export const MobileView: React.FC<MobileViewProps> = ({
     };
 
     // Switch view and auto-close search
-    const setViewModeWithSideEffects = (mode: 'table' | 'calendar' | 'analytics' | 'budget') => {
+    const setViewModeWithSideEffects = (mode: 'table' | 'calendar' | 'analytics' | 'budget' | 'about') => {
         setViewMode(mode);
         if (mode !== 'table') setIsSearchOpen(false);
     };
@@ -224,16 +259,16 @@ export const MobileView: React.FC<MobileViewProps> = ({
         <div className="flex flex-col h-[100dvh] bg-stone-50 overflow-hidden">
             {/* Header */}
             <header className="bg-white px-4 py-3 border-b border-stone-200 flex justify-between items-center shadow-sm shrink-0">
-                <div className="flex items-center gap-2.5">
-                    <div className="p-1.5 bg-stone-800 rounded-lg shadow">
-                        <Wallet className="w-4 h-4 text-white" />
-                    </div>
+                <div className="flex items-center gap-2">
+                    <img
+                        src="/logo.png"
+                        alt="OhMonsea Logo"
+                        className="h-6 w-auto object-contain"
+                    />
+                    <div className="w-px h-6 bg-stone-200" />
                     <div>
-                        <h1 className="text-sm font-black text-stone-900 font-serif leading-tight">
-                            <span>Oh</span><span className="text-indigo-600">Monsea</span>
-                            <span className="font-light text-stone-500 text-xs"> SF</span>
-                        </h1>
-                        <p className="text-[8px] text-stone-400 font-bold uppercase tracking-widest">v{appVersion}</p>
+                        <p className="text-[9px] uppercase tracking-[0.15em] font-bold leading-tight" style={{ color: '#1b2a4a' }}>Self Finance</p>
+                        <p className="text-[8px] uppercase tracking-widest font-semibold" style={{ color: '#4a6080' }}>v{appVersion}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -255,8 +290,9 @@ export const MobileView: React.FC<MobileViewProps> = ({
                     <button
                         onClick={() => { setShowFileManager(true); setActiveTab('open'); }}
                         className="p-1.5 text-stone-500 hover:bg-stone-100 rounded-lg transition-colors"
+                        title="Simpan Data"
                     >
-                        <FolderOpen className="w-5 h-5" />
+                        <Save className="w-5 h-5" />
                     </button>
                     <button
                         onClick={() => setIsSettingsOpen(true)}
@@ -414,19 +450,32 @@ export const MobileView: React.FC<MobileViewProps> = ({
                                                                 </span>
                                                                 <span className="text-[10px] text-stone-400 font-mono">#{row.id}</span>
                                                             </div>
-                                                            <div className="flex gap-2">
+                                                            <div className="flex gap-2 relative">
                                                                 <button
-                                                                    onClick={() => handleEditClick(row)}
-                                                                    className="p-1.5 text-stone-400 hover:text-indigo-500 bg-stone-50 rounded-lg active-shrink transition-all border border-stone-100"
+                                                                    onClick={(e) => { e.stopPropagation(); setOpenActionId(openActionId === row.id ? null : row.id); }}
+                                                                    className={cn("p-1.5 rounded-lg active-shrink transition-all border border-stone-100", openActionId === row.id ? "bg-stone-200 text-stone-600" : "text-stone-400 hover:text-stone-600 bg-stone-50")}
                                                                 >
-                                                                    <Pencil className="w-3.5 h-3.5" />
+                                                                    <MoreVertical className="w-4 h-4" />
                                                                 </button>
-                                                                <button
-                                                                    onClick={() => handleDeleteClick(row.id)}
-                                                                    className="p-1.5 text-stone-400 hover:text-rose-500 bg-stone-50 rounded-lg active-shrink transition-all border border-stone-100"
-                                                                >
-                                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                                </button>
+                                                                {openActionId === row.id && (
+                                                                    <div
+                                                                        className="absolute right-0 top-full mt-1 bg-white border border-stone-200 rounded-xl shadow-xl z-50 overflow-hidden min-w-[120px] animate-fade-in"
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                    >
+                                                                        <button
+                                                                            onClick={() => { handleEditClick(row); setOpenActionId(null); }}
+                                                                            className="w-full text-left px-4 py-2.5 text-xs font-bold text-stone-600 hover:bg-stone-50 flex items-center gap-2 border-b border-stone-100"
+                                                                        >
+                                                                            <Pencil className="w-3.5 h-3.5" /> Edit
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => { handleDeleteClick(row.id); setOpenActionId(null); }}
+                                                                            className="w-full text-left px-4 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2"
+                                                                        >
+                                                                            <Trash2 className="w-3.5 h-3.5" /> Hapus
+                                                                        </button>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                         <h4 className="text-sm font-bold text-stone-800 mb-1">{row.description}</h4>
@@ -436,10 +485,10 @@ export const MobileView: React.FC<MobileViewProps> = ({
                                                             </div>
                                                             <div className="text-right">
                                                                 {(row.actIncome > 0 || row.planIncome > 0) && (
-                                                                    <p className="text-emerald-600 font-bold text-xs">+{formatCurrency(row.actIncome || row.planIncome)}</p>
+                                                                    <p className="text-emerald-600 font-bold text-xs font-mono">+{formatCurrency(row.actIncome || row.planIncome)}</p>
                                                                 )}
                                                                 {(row.actExpense > 0 || row.planExpense > 0) && (
-                                                                    <p className="text-rose-600 font-bold text-xs">-{formatCurrency(row.actExpense || row.planExpense)}</p>
+                                                                    <p className="text-rose-600 font-bold text-xs font-mono">-{formatCurrency(row.actExpense || row.planExpense)}</p>
                                                                 )}
                                                             </div>
                                                         </div>
@@ -456,54 +505,12 @@ export const MobileView: React.FC<MobileViewProps> = ({
 
                 {/* View: Analytics */}
                 {viewMode === 'analytics' && (
-                    <div className="p-4 space-y-6 pb-24">
-                        {/* Pie Chart Card */}
-                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm">
-                            <h3 className="text-xs font-bold text-stone-700 mb-4 flex items-center gap-2"><PieIcon className="w-4 h-4 text-stone-400" /> Distribusi Pengeluaran</h3>
-                            <div className="h-48 w-full">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <PieChart>
-                                        <Pie
-                                            data={analyticsData.pieData}
-                                            cx="50%" cy="50%" innerRadius={40} outerRadius={70}
-                                            paddingAngle={5} dataKey="value"
-                                        >
-                                            {analyticsData.pieData.map((entry: any, index: number) => (
-                                                <Cell key={`cell - ${index} `} fill={['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#71717a'][index % 7]} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                            </div>
-                            <div className="mt-4 grid grid-cols-2 gap-2">
-                                {analyticsData.pieData.slice(0, 4).map((item: any, i: number) => (
-                                    <div key={i} className="flex items-center gap-2 text-[10px] text-stone-600">
-                                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'][i % 4] }}></div>
-                                        <span className="truncate flex-1">{item.name}</span>
-                                        <span className="font-bold">{((item.value / analyticsData.totalExp) * 100).toFixed(0)}%</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Suggestions */}
-                        <div className="space-y-3">
-                            <h3 className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider px-1">Rekomendasi Pintar</h3>
-                            {analyticsData.suggestions.map((s: any, i: number) => (
-                                <div key={i} className={cn(
-                                    "p-3 rounded-xl border text-[11px] leading-relaxed flex gap-3",
-                                    s.type === 'warning' ? "bg-rose-50 border-rose-100 text-rose-800" :
-                                        s.type === 'success' ? "bg-emerald-50 border-emerald-100 text-emerald-800" :
-                                            "bg-blue-50 border-blue-100 text-blue-800"
-                                )}>
-                                    <div className="mt-0.5">
-                                        {s.type === 'warning' ? <TrendingDown className="w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
-                                    </div>
-                                    <p>{s.text}</p>
-                                </div>
-                            ))}
-                        </div>
+                    <div className="h-full overflow-hidden">
+                        <AnalyticsView
+                            analyticsData={analyticsData}
+                            dateRange={dateRange}
+                            setDateRange={setDateRange}
+                        />
                     </div>
                 )}
 
@@ -665,19 +672,32 @@ export const MobileView: React.FC<MobileViewProps> = ({
                                                         {(t.actExpense > 0 || t.planExpense > 0) && <p className="text-rose-600 font-black text-[11px]">-{formatCurrency(t.actExpense || t.planExpense)}</p>}
                                                     </div>
                                                 </div>
-                                                <div className="flex gap-1">
+                                                <div className="flex gap-1 relative">
                                                     <button
-                                                        onClick={() => handleEditClick(t as any)}
-                                                        className="p-2 text-stone-400 hover:text-indigo-500 bg-white rounded-lg border border-stone-100 active:scale-110 transition-all"
+                                                        onClick={(e) => { e.stopPropagation(); setOpenActionId(openActionId === t.id ? null : t.id); }}
+                                                        className={cn("p-1.5 rounded-lg active-shrink transition-all border border-stone-100", openActionId === t.id ? "bg-stone-200 text-stone-600" : "text-stone-400 hover:text-stone-600 bg-white")}
                                                     >
-                                                        <Pencil className="w-3.5 h-3.5" />
+                                                        <MoreVertical className="w-4 h-4" />
                                                     </button>
-                                                    <button
-                                                        onClick={() => handleDeleteClick(t.id)}
-                                                        className="p-2 text-stone-400 hover:text-rose-500 bg-white rounded-lg border border-stone-100 active:scale-110 transition-all"
-                                                    >
-                                                        <Trash2 className="w-3.5 h-3.5" />
-                                                    </button>
+                                                    {openActionId === t.id && (
+                                                        <div
+                                                            className="absolute right-0 top-full mt-1 bg-white border border-stone-200 rounded-xl shadow-xl z-50 overflow-hidden min-w-[120px] animate-fade-in"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        >
+                                                            <button
+                                                                onClick={() => { handleEditClick(t as any); setOpenActionId(null); }}
+                                                                className="w-full text-left px-4 py-2.5 text-xs font-bold text-stone-600 hover:bg-stone-50 flex items-center gap-2 border-b border-stone-100"
+                                                            >
+                                                                <Pencil className="w-3.5 h-3.5" /> Edit
+                                                            </button>
+                                                            <button
+                                                                onClick={() => { handleDeleteClick(t.id); setOpenActionId(null); }}
+                                                                className="w-full text-left px-4 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" /> Hapus
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))
@@ -685,6 +705,13 @@ export const MobileView: React.FC<MobileViewProps> = ({
                                 </div>
                             </div>
                         )}
+                    </div>
+                )}
+
+                {/* View: About */}
+                {viewMode === 'about' && (
+                    <div className="pb-24">
+                        <AboutView appVersion={appVersion} />
                     </div>
                 )}
             </main>
@@ -726,64 +753,111 @@ export const MobileView: React.FC<MobileViewProps> = ({
                         onClick={() => setViewModeWithSideEffects('budget')}
                         className={cn("flex flex-col items-center p-2 rounded-xl transition-all active-shrink", viewMode === 'budget' ? "text-stone-800" : "text-stone-400")}
                     >
-                        <div className={cn("p-1.5 rounded-xl mb-1 transition-all", viewMode === 'budget' ? "bg-stone-100" : "")}>
-                            <Target className="w-6 h-6" />
+                        <div className={cn("p-1.5 rounded-xl mb-1 transition-all", viewMode === 'budget' ? "bg-emerald-100" : "")}>
+                            <Target className={cn("w-6 h-6", viewMode === 'budget' ? "text-emerald-600" : "")} />
                         </div>
                         <span className="text-[10px] font-black uppercase tracking-tight">Budget</span>
+                    </button>
+
+                    <button
+                        onClick={() => setViewModeWithSideEffects('about')}
+                        className={cn("flex flex-col items-center p-2 rounded-xl transition-all active-shrink", viewMode === 'about' ? "text-stone-800" : "text-stone-400")}
+                    >
+                        <div className={cn("p-1.5 rounded-xl mb-1 transition-all", viewMode === 'about' ? "bg-stone-100" : "")}>
+                            <Info className={cn("w-6 h-6", viewMode === 'about' ? "text-stone-600" : "")} />
+                        </div>
+                        <span className="text-[10px] font-black uppercase tracking-tight">Tentang</span>
                     </button>
                 </div>
             </nav>
 
-            {/* Mobile Modal: Add Transaction */}
-            {
-                isModalOpen && (
-                    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
-                        <div className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setIsModalOpen(false)}></div>
-                        <div className="relative bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl p-6 animate-slide-up-bounce">
-                            <div className="flex justify-between items-center mb-6">
-                                <h2 className="text-lg font-bold text-stone-800">{editMode ? 'Edit Transaksi' : 'Transaksi Baru'}</h2>
-                                <button
-                                    onClick={() => { setIsModalOpen(false); setEditMode(null); }}
-                                    className="p-1 hover:bg-stone-100 rounded-full transition-colors"
-                                >
-                                    <X className="w-6 h-6 text-stone-400" />
+            {/* Mobile Modal: Add / Edit Transaction */}
+            {isModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
+                    <div className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm animate-fade-in" onClick={() => { setIsModalOpen(false); setEditMode(null); }}></div>
+                    <div className="relative bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl animate-slide-up-bounce overflow-hidden">
+                        <div className="px-6 pt-6 pb-4">
+                            <div className="w-12 h-1 bg-stone-200 rounded-full mx-auto mb-5 sm:hidden"></div>
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-xl font-black text-stone-800">{editMode ? 'Edit Transaksi' : 'Transaksi Baru'}</h2>
+                                <button onClick={() => { setIsModalOpen(false); setEditMode(null); }} className="p-2 rounded-full hover:bg-stone-100 transition-colors">
+                                    <X className="w-5 h-5 text-stone-400" />
                                 </button>
                             </div>
-                            <form onSubmit={handleSaveTransaction} className="space-y-4 pb-8">
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-stone-400 uppercase">Tanggal</label>
-                                        <input type="date" required value={newTrans.date} onChange={(e) => setNewTrans({ ...newTrans, date: e.target.value })} className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-stone-400" />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-stone-400 uppercase">Kategori</label>
-                                        <select value={newTrans.category} onChange={(e) => setNewTrans({ ...newTrans, category: e.target.value as TransactionCategory })} className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-stone-400">
-                                            {CATEGORIES.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-stone-400 uppercase">Keterangan</label>
-                                    <input type="text" required placeholder="Nongkrong, Belanja, dll" value={newTrans.description} onChange={(e) => setNewTrans({ ...newTrans, description: e.target.value })} className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-stone-400" />
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-emerald-500 uppercase">Rencana Masuk</label>
-                                        <input type="text" placeholder="0" value={newTrans.planIncome} onChange={(e) => handleCurrencyInput('planIncome', e.target.value)} className="w-full p-2.5 bg-emerald-50 border border-emerald-100 rounded-xl text-xs outline-none focus:ring-2 focus:ring-emerald-500 text-right font-bold text-emerald-600" />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-rose-500 uppercase">Rencana Keluar</label>
-                                        <input type="text" placeholder="0" value={newTrans.planExpense} onChange={(e) => handleCurrencyInput('planExpense', e.target.value)} className="w-full p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-xs outline-none focus:ring-2 focus:ring-rose-500 text-right font-bold text-rose-600" />
-                                    </div>
-                                </div>
-                                <button type="submit" className={cn("w-full py-3.5 rounded-2xl font-bold mt-4 flex justify-center items-center gap-2", btnPrimaryClass)}>
-                                    <CheckCircle2 className="w-5 h-5" /> {editMode ? 'Simpan Perubahan' : 'Simpan Transaksi'}
-                                </button>
-                            </form>
                         </div>
+
+                        {!editMode && (
+                            <div className="px-6 pb-4">
+                                <div className="grid grid-cols-2 gap-2 bg-stone-100 p-1 rounded-xl">
+                                    <button type="button" onClick={() => { setMobileModalType('income'); setNewTrans({ ...newTrans, planIncome: '', planExpense: '' }); }}
+                                        className={cn("flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all",
+                                            mobileModalType === 'income' ? "bg-emerald-500 text-white shadow-md shadow-emerald-200" : "text-stone-400")}>
+                                        <TrendingUp className="w-4 h-4" /> Pemasukan
+                                    </button>
+                                    <button type="button" onClick={() => { setMobileModalType('expense'); setNewTrans({ ...newTrans, planIncome: '', planExpense: '' }); }}
+                                        className={cn("flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all",
+                                            mobileModalType === 'expense' ? "bg-rose-500 text-white shadow-md shadow-rose-200" : "text-stone-400")}>
+                                        <TrendingDown className="w-4 h-4" /> Pengeluaran
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        <form onSubmit={handleSaveTransaction} className="px-6 pb-6 space-y-4">
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Tanggal</label>
+                                    <input type="date" required value={newTrans.date} onChange={(e) => setNewTrans({ ...newTrans, date: e.target.value })} className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-stone-400" />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Kategori</label>
+                                    <select value={newTrans.category} onChange={(e) => setNewTrans({ ...newTrans, category: e.target.value as TransactionCategory })} className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-stone-400">
+                                        {CATEGORIES.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Keterangan</label>
+                                <input type="text" required placeholder={editMode ? "Keterangan transaksi" : "Nongkrong, Belanja, Gaji..."} value={newTrans.description} onChange={(e) => setNewTrans({ ...newTrans, description: e.target.value })} className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-stone-400" />
+                            </div>
+
+                            {editMode ? (
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-bold text-emerald-500 uppercase">Rencana Masuk</label>
+                                        <input type="text" placeholder="0" value={newTrans.planIncome} onChange={(e) => handleCurrencyInput('planIncome', e.target.value)} className="w-full p-2.5 bg-emerald-50 border border-emerald-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500 text-right font-bold text-emerald-600" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-bold text-rose-500 uppercase">Rencana Keluar</label>
+                                        <input type="text" placeholder="0" value={newTrans.planExpense} onChange={(e) => handleCurrencyInput('planExpense', e.target.value)} className="w-full p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 text-right font-bold text-rose-600" />
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-1.5">
+                                    <label className={cn("text-[10px] font-bold uppercase tracking-wider", mobileModalType === 'income' ? "text-emerald-600" : "text-rose-600")}>
+                                        Nominal {mobileModalType === 'income' ? 'Pemasukan' : 'Pengeluaran'}
+                                    </label>
+                                    <div className={cn("flex items-center gap-2 rounded-xl border p-2.5", mobileModalType === 'income' ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200")}>
+                                        <span className={cn("text-sm font-bold", mobileModalType === 'income' ? "text-emerald-500" : "text-rose-500")}>Rp</span>
+                                        <input type="text" placeholder="0" inputMode="numeric"
+                                            value={mobileModalType === 'income' ? newTrans.planIncome : newTrans.planExpense}
+                                            onChange={(e) => handleCurrencyInput(mobileModalType === 'income' ? 'planIncome' : 'planExpense', e.target.value)}
+                                            className={cn("flex-1 bg-transparent outline-none text-right font-bold text-lg", mobileModalType === 'income' ? "text-emerald-700" : "text-rose-700")} />
+                                    </div>
+                                </div>
+                            )}
+
+                            <button type="submit" className={cn("w-full py-3.5 rounded-2xl font-bold flex justify-center items-center gap-2 text-white shadow-lg transition-all active:scale-[0.98]",
+                                editMode ? "bg-stone-800 hover:bg-stone-900 shadow-stone-200" :
+                                    mobileModalType === 'income' ? "bg-emerald-500 hover:bg-emerald-600 shadow-emerald-200" : "bg-rose-500 hover:bg-rose-600 shadow-rose-200"
+                            )}>
+                                <CheckCircle2 className="w-5 h-5" />
+                                {editMode ? 'Simpan Perubahan' : `Simpan ${mobileModalType === 'income' ? 'Pemasukan' : 'Pengeluaran'}`}
+                            </button>
+                        </form>
                     </div>
-                )
-            }
+                </div>
+            )}
 
             {/* Confirmation Modal */}
             {
@@ -869,6 +943,56 @@ export const MobileView: React.FC<MobileViewProps> = ({
                             >
                                 Simpan Limit
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ─── Exit Confirmation Modal ─── */}
+            {exitConfirmOpen && (
+                <div className="fixed inset-0 z-[150] flex items-center justify-center p-6">
+                    {/* Dimmed backdrop */}
+                    <div
+                        className="absolute inset-0 bg-stone-900/50 backdrop-blur-sm animate-fade-in"
+                        onClick={() => setExitConfirmOpen(false)}
+                    />
+                    {/* Card */}
+                    <div className="relative bg-white w-full max-w-xs rounded-3xl shadow-2xl overflow-hidden animate-scale-in">
+                        {/* Top accent bar */}
+                        <div className="h-1.5 w-full bg-gradient-to-r from-rose-400 to-orange-400" />
+                        <div className="p-6 flex flex-col items-center text-center gap-4">
+                            {/* Icon */}
+                            <div className="w-14 h-14 rounded-2xl bg-rose-50 flex items-center justify-center">
+                                <LogOut className="w-7 h-7 text-rose-500" />
+                            </div>
+                            {/* Text */}
+                            <div>
+                                <h3 className="text-lg font-black text-stone-800 mb-1">Keluar Aplikasi?</h3>
+                                <p className="text-xs text-stone-400 leading-relaxed">
+                                    Semua data tersimpan secara lokal.
+                                    <br />Yakin ingin keluar sekarang?
+                                </p>
+                            </div>
+                            {/* Buttons */}
+                            <div className="flex w-full gap-3 pt-1">
+                                <button
+                                    onClick={() => setExitConfirmOpen(false)}
+                                    className="flex-1 py-3 rounded-2xl border-2 border-stone-200 text-stone-600 text-sm font-bold active:bg-stone-50 transition-colors"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        setExitConfirmOpen(false);
+                                        const { App } = await import('@capacitor/app');
+                                        App.exitApp();
+                                    }}
+                                    className="flex-1 py-3 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white text-sm font-bold shadow-lg shadow-rose-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                                >
+                                    <LogOut className="w-4 h-4" />
+                                    Keluar
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -1,9 +1,19 @@
 {
   "name": "OhMonsea Finance Plan",
   "description": "A high-end, real-time financial planning tool with automatic balance forecasting.",
-  "version": "2.3.0",
-  "changelog": "Versi 2.3.0: Premium Animations & Multi-Month PDF. Penambahan sistem animasi (staggered list, bounce, tactile feedback), fitur pemilihan bulan saat cetak PDF, perbaikan tampilan anggaran mobile, dan optimasi performa ekspor laporan.",
+  "version": "3.1.0",
+  "changelog": "Versi 3.1.0: Analytics penuh di mobile, filter tanggal analytics, kategori kustom di pengaturan, notif toast menggantikan alert, font monospace untuk angka, BudgetView redesign, splash screen 3 detik, auto-save dengan notifikasi.",
   "versionHistory": [
+    {
+      "version": "3.1.0",
+      "date": "25/02/2026",
+      "changes": "Analytics view penuh di mobile · Filter rentang tanggal di Analytics (semua chart merespons) · Manajemen kategori kustom di Pengaturan (tambah/hapus, warna) · Kategori kustom muncul di form tambah & edit data · Font JetBrains Mono untuk semua angka/currency · Notifikasi toast (kanan bawah 3 detik) menggantikan browser alert() · BudgetView redesign dengan ring progress SVG · Splash screen diperpendek menjadi 3 detik · Auto-save otomatis dengan notifikasi info"
+    },
+    {
+      "version": "3.0.0",
+      "date": "24/02/2026",
+      "changes": "Analytics: 5 fitur baru (donut chart, tren multi-bulan, bulan vs bulan, insight mingguan, heatmap pengeluaran). Notif exit mobile (Capacitor). HelpButton kontekstual di semua chart & kartu. Perbaikan font harmonisasi global Inter."
+    },
     {
       "version": "2.3.0",
       "date": "24/02/2026",

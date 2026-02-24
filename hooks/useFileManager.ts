@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
+import NativeDownload from '../src/plugins/NativeDownload';
 import { Transaction, CalculatedTransaction } from '../types';
 import { exportToExcel, importFromExcel } from '../utils/excel';
 
@@ -13,7 +15,8 @@ interface SavedFile {
 export function useFileManager(
     transactions: Transaction[],
     setTransactions: (t: Transaction[]) => void,
-    calculatedData: CalculatedTransaction[]
+    calculatedData: CalculatedTransaction[],
+    showToast: (msg: string, type?: 'success' | 'error' | 'info' | 'warning') => void = () => { },
 ) {
     const [showFileManager, setShowFileManager] = useState(false);
     const [savedFiles, setSavedFiles] = useState<SavedFile[]>([]);
@@ -40,10 +43,10 @@ export function useFileManager(
             const writable = await fileHandle.createWritable();
             await writable.write(JSON.stringify(transactions, null, 2));
             await writable.close();
-            alert("Perubahan tersimpan ke file lokal!");
+            showToast('Perubahan tersimpan ke file lokal ✓', 'success');
         } catch (err) {
             console.error(err);
-            alert("Gagal menyimpan otomatis. Izin mungkin dicabut.");
+            showToast('Gagal menyimpan otomatis. Izin mungkin dicabut.', 'error');
         }
     };
 
@@ -59,7 +62,7 @@ export function useFileManager(
             await writable.write(JSON.stringify(transactions, null, 2));
             await writable.close();
             setShowFileManager(false);
-            alert("File berhasil disimpan! Anda sekarang bisa menekan Ctrl+S untuk menyimpan perubahan langsung ke file ini.");
+            showToast('File berhasil disimpan! Tekan Ctrl+S untuk update langsung.', 'success');
         } catch (err) {
             if ((err as Error).name !== 'AbortError') {
                 handleJsonExport(); // Fallback
@@ -68,7 +71,7 @@ export function useFileManager(
     };
 
     const handleSaveInternal = () => {
-        if (!fileNameInput.trim()) return alert("Masukkan nama file!");
+        if (!fileNameInput.trim()) { showToast('Masukkan nama file terlebih dahulu!', 'warning'); return; }
         const newFile: SavedFile = { id: Date.now(), name: fileNameInput, date: new Date().toISOString(), itemCount: transactions.length, data: [...transactions] };
         setSavedFiles(prev => {
             const exists = prev.findIndex(f => f.name.toLowerCase() === fileNameInput.toLowerCase());
@@ -82,8 +85,29 @@ export function useFileManager(
         setActiveTab('open');
     };
 
-    const handleJsonExport = () => {
-        const blob = new Blob([JSON.stringify(transactions, null, 2)], { type: 'application/json' });
+    const handleJsonExport = async () => {
+        const jsonContent = JSON.stringify(transactions, null, 2);
+
+        if (Capacitor.isNativePlatform()) {
+            try {
+                const fileName = `OhMonsea_Backup_${new Date().getTime()}.json`;
+                // Convert utf-8 string to base64
+                const base64Data = btoa(unescape(encodeURIComponent(jsonContent)));
+
+                await NativeDownload.download({
+                    filename: fileName,
+                    base64Data: base64Data,
+                    mimeType: 'application/json'
+                });
+                showToast('File JSON berhasil disimpan ke folder Download', 'success');
+            } catch (err) {
+                console.error("Export JSON Error:", err);
+                showToast('Gagal mengekspor file di perangkat.', 'error');
+            }
+            return;
+        }
+
+        const blob = new Blob([jsonContent], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

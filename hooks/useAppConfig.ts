@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export type ViewMode = 'table' | 'calendar' | 'analytics' | 'budget';
+export type ViewMode = 'table' | 'calendar' | 'analytics' | 'budget' | 'about';
 
 export interface VersionHistory {
     version: string;
@@ -16,7 +16,7 @@ export function useAppConfig() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
     // Metadata & Updates
-    const [appVersion, setAppVersion] = useState('3.0.0');
+    const [appVersion, setAppVersion] = useState('4.0.0');
     const [versionHistory, setVersionHistory] = useState<VersionHistory[]>([]);
     const [updateAvailable, setUpdateAvailable] = useState(false);
     const [remoteVersion, setRemoteVersion] = useState('');

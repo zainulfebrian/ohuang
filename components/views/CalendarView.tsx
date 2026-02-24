@@ -4,6 +4,7 @@ import { cn } from '../../utils/cn';
 import { formatCurrency } from '../../utils/formatters';
 import { CATEGORIES } from '../../constants';
 import { Transaction } from '../../types';
+import { HelpButton } from '../ui/HelpButton';
 
 interface CalendarViewProps {
     calendarDate: Date;
@@ -36,7 +37,17 @@ export function CalendarView({
                     <Calendar className="w-5 h-5 text-stone-500" />
                     {monthNames[calendarDate.getMonth()]} {calendarDate.getFullYear()}
                 </h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                    <HelpButton
+                        title="Kalender Transaksi"
+                        tips={[
+                            { title: 'Klik Tanggal', desc: 'Klik pada tanggal untuk melihat daftar transaksi di hari tersebut.' },
+                            { title: 'Titik Hijau/Merah', desc: 'Titik hijau = ada pemasukan, merah = ada pengeluaran pada hari itu.' },
+                            { title: 'Ganti Bulan', desc: 'Gunakan tombol panah untuk berpindah bulan.' },
+                            { title: 'Hari Ini', desc: 'Tombol "Hari Ini" untuk kembali ke bulan berjalan.' },
+                            { title: 'Angka badge', desc: 'Angka kecil di pojok atas tanggal menunjukkan jumlah transaksi hari itu.' },
+                        ]}
+                    />
                     <button onClick={handlePrevMonth} className="p-2 bg-white border border-stone-200 rounded-lg hover:bg-stone-100 transition-colors"><ArrowUp className="w-4 h-4 -rotate-90" /></button>
                     <button onClick={() => setCalendarDate(new Date())} className="px-3 py-2 bg-white border border-stone-200 rounded-lg text-xs font-bold hover:bg-stone-100 transition-colors">Hari Ini</button>
                     <button onClick={handleNextMonth} className="p-2 bg-white border border-stone-200 rounded-lg hover:bg-stone-100 transition-colors"><ArrowDown className="w-4 h-4 -rotate-90" /></button>

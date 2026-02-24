@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ArrowUp, ArrowDown, Trash2, X } from 'lucide-react';
 import { MobileView } from './components/mobile/MobileView';
 import { Transaction, TransactionCategory } from './types';
@@ -12,8 +12,10 @@ import { useTransactions } from './hooks/useTransactions';
 import { useAppConfig } from './hooks/useAppConfig';
 import { useFileManager } from './hooks/useFileManager';
 import { useCalendar } from './hooks/useCalendar';
-import { useAnalytics } from './hooks/useAnalytics';
+import { useAnalytics, DateRange } from './hooks/useAnalytics';
 import { useBudgets } from './hooks/useBudgets';
+import { useCategories } from './hooks/useCategories';
+import { useToast } from './components/ui/ToastProvider';
 
 // Components
 import { Header } from './components/layout/Header';
@@ -27,6 +29,8 @@ import { FileManagerModal } from './components/modals/FileManagerModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { UpdateModal } from './components/modals/UpdateModal';
 import { ExportSelectionModal } from './components/modals/ExportSelectionModal';
+import { SplashScreen } from './components/SplashScreen';
+import { AboutView } from './components/views/AboutView';
 
 export function App() {
     const {
@@ -36,19 +40,25 @@ export function App() {
         isUpdateModalOpen, setIsUpdateModalOpen, showUpdateToast, setShowUpdateToast, isMobile
     } = useAppConfig();
 
+    const { toast } = useToast();
+    const { allCategories } = useCategories();
+
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [showSplash, setShowSplash] = useState(true);
+    const [dateRange, setDateRange] = useState<DateRange>({ from: '', to: '' });
 
     const {
         transactions, setTransactions, loading, filteredData, totals, calculatedData,
-        handleUpdate, handleDelete, handleAddRow, addTransaction, resetData,
-        groupBy, setGroupBy, categoryFilter, setCategoryFilter
+        handleUpdate, handleUpdateRow, handleDelete, handleAddRow, addTransaction, resetData,
+        groupBy, setGroupBy, categoryFilter, setCategoryFilter,
+        undo, redo, canUndo, canRedo
     } = useTransactions(searchQuery);
 
     const {
         showFileManager, setShowFileManager, savedFiles, fileNameInput, setFileNameInput,
         activeTab, setActiveTab, fileHandle, handleQuickSave, handleSaveToDisk,
         handleSaveInternal, handleJsonExport, handleExcelImport
-    } = useFileManager(transactions, setTransactions, calculatedData);
+    } = useFileManager(transactions, setTransactions, calculatedData, toast);
 
     const {
         calendarDate, setCalendarDate, selectedDate, setSelectedDate,
@@ -94,7 +104,22 @@ export function App() {
         setIsExportModalOpen(false);
     };
 
-    const analyticsData = useAnalytics(filteredData);
+    const analyticsData = useAnalytics(filteredData, calculatedData, dateRange);
+
+    const monthlyTotals = useMemo(() => {
+        const now = new Date();
+        const thisMonth = calculatedData.filter(t => {
+            if (!t.date) return false;
+            const d = new Date(parseDateValue(t.date));
+            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        });
+        const actIncome = thisMonth.reduce((a, t) => a + (t.actIncome || 0), 0);
+        const actExpense = thisMonth.reduce((a, t) => a + (t.actExpense || 0), 0);
+        const estIncome = thisMonth.reduce((a, t) => a + (t.planIncome || 0), 0);
+        const estExpense = thisMonth.reduce((a, t) => a + (t.planExpense || 0), 0);
+        const monthLabel = now.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        return { actIncome, actExpense, estIncome, estExpense, monthLabel };
+    }, [calculatedData, parseDateValue]);
 
     const [newTrans, setNewTrans] = useState({
         date: '',
@@ -110,6 +135,13 @@ export function App() {
 
     const fileExcelRef = useRef<HTMLInputElement>(null);
     const fileJsonRef = useRef<HTMLInputElement>(null);
+
+    // Auto-save to localStorage whenever transactions change
+    useEffect(() => {
+        if (transactions.length === 0) return;
+        localStorage.setItem('ohmonsea_transactions', JSON.stringify(transactions));
+        toast('Perubahan tersimpan otomatis', 'info');
+    }, [transactions]);
 
     // Context Menu Handlers
     useEffect(() => {
@@ -147,7 +179,7 @@ export function App() {
     // Modal Handlers
     const handleAddTransaction = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newTrans.date || !newTrans.description) { alert("Wajib diisi!"); return; }
+        if (!newTrans.date || !newTrans.description) { toast('Tanggal & keterangan wajib diisi!', 'warning'); return; }
 
         const newItem: Transaction = {
             id: transactions.length + 1,
@@ -176,6 +208,9 @@ export function App() {
 
     return (
         <React.Fragment>
+            {showSplash && (
+                <SplashScreen appVersion={appVersion} onFinish={() => setShowSplash(false)} />
+            )}
             <ExportSelectionModal
                 isOpen={isExportModalOpen}
                 onClose={() => setIsExportModalOpen(false)}
@@ -226,6 +261,8 @@ export function App() {
                         onUpdateBudget={updateBudget}
                         onExportPDF={onExportPDF}
                         currentMonthYear={currentMonthYear}
+                        dateRange={dateRange}
+                        setDateRange={setDateRange}
                     />
                 ) : (
                     <>
@@ -242,7 +279,7 @@ export function App() {
                             onExportPDF={onExportPDF}
                         />
 
-                        <SummaryCards totals={totals} />
+                        {viewMode !== 'about' && <SummaryCards totals={totals} monthlyTotals={monthlyTotals} />}
 
                         <main className="flex-1 overflow-hidden w-full px-4 sm:px-6 lg:px-8 py-4 flex flex-col relative bg-stone-50">
                             {viewMode === 'table' && (
@@ -251,16 +288,25 @@ export function App() {
                                     compactMode={compactMode}
                                     setCompactMode={setCompactMode}
                                     handleUpdate={handleUpdate}
+                                    handleUpdateRow={handleUpdateRow}
                                     handleDelete={handleDelete}
                                     handleContextMenu={handleContextMenu}
                                     groupBy={groupBy}
                                     setGroupBy={setGroupBy}
                                     categoryFilter={categoryFilter}
                                     setCategoryFilter={setCategoryFilter}
+                                    undo={undo}
+                                    redo={redo}
+                                    canUndo={canUndo}
+                                    canRedo={canRedo}
+                                    showToast={toast}
+                                    categories={allCategories}
                                 />
                             )}
 
-                            {viewMode === 'analytics' && <AnalyticsView analyticsData={analyticsData} />}
+                            {viewMode === 'analytics' && <AnalyticsView analyticsData={analyticsData} dateRange={dateRange} setDateRange={setDateRange} />}
+
+                            {viewMode === 'about' && <AboutView appVersion={appVersion} />}
 
                             {viewMode === 'budget' && (
                                 <BudgetView
@@ -298,6 +344,7 @@ export function App() {
                     setNewTrans={setNewTrans}
                     handleCurrencyInput={handleCurrencyInput}
                     handleAddTransaction={handleAddTransaction}
+                    categories={allCategories}
                 />
 
                 <FileManagerModal

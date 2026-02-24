@@ -1,7 +1,9 @@
 import * as XLSX from 'xlsx';
+import { Capacitor } from '@capacitor/core';
+import NativeDownload from '../src/plugins/NativeDownload';
 import { Transaction, CalculatedTransaction } from '../types';
 
-export const exportToExcel = (data: CalculatedTransaction[]) => {
+export const exportToExcel = async (data: CalculatedTransaction[]) => {
     const formattedData = data.map(item => ({
         'ID': item.id,
         'Tanggal': item.date,
@@ -28,7 +30,25 @@ export const exportToExcel = (data: CalculatedTransaction[]) => {
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "OhMonsea Plan");
-    XLSX.writeFile(workbook, "OhMonsea_Finance_Plan.xlsx");
+
+    if (Capacitor.isNativePlatform()) {
+        try {
+            const base64Data = XLSX.write(workbook, { bookType: 'xlsx', type: 'base64' });
+            const fileName = `OhMonsea_Finance_Plan_${new Date().getTime()}.xlsx`;
+
+            await NativeDownload.download({
+                filename: fileName,
+                base64Data: base64Data,
+                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            });
+            alert('File Excel berhasil disimpan ke folder Download');
+        } catch (err) {
+            console.error("Export Excel Error:", err);
+            alert('Gagal mengekspor file Excel di perangkat.');
+        }
+    } else {
+        XLSX.writeFile(workbook, "OhMonsea_Finance_Plan.xlsx");
+    }
 };
 
 export const importFromExcel = (file: File): Promise<Transaction[]> => {

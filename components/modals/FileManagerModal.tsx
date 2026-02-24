@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, FolderOpen, FileJson, Table, HardDrive, Download } from 'lucide-react';
+import { X, Save, FileJson, Table, HardDrive, Download } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { Transaction } from '../../types';
 
@@ -53,7 +53,7 @@ export function FileManagerModal({
             <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={() => setShowFileManager(false)}></div>
             <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-white/50 modal-animate flex flex-col max-h-[85vh]">
                 <div className="bg-stone-50 px-6 py-4 border-b border-stone-200 flex justify-between items-center">
-                    <h2 className="text-lg font-bold text-stone-800 flex items-center gap-2"><FolderOpen className="w-5 h-5 text-stone-500" /> File Manager</h2>
+                    <h2 className="text-lg font-bold text-stone-800 flex items-center gap-2"><Save className="w-5 h-5 text-stone-500" /> Simpan Data</h2>
                     <button onClick={() => setShowFileManager(false)}><X className="w-5 h-5 text-stone-400" /></button>
                 </div>
 
