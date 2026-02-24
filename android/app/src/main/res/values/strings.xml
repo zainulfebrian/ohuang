@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">OhMonsea Finance Plan</string>
+    <string name="title_activity_main">OhMonsea Finance Plan</string>
+    <string name="package_name">com.ohmonsea.financeplan</string>
+    <string name="custom_url_scheme">com.ohmonsea.financeplan</string>
+</resources>
