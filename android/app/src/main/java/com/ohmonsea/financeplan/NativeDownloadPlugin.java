@@ -3,11 +3,13 @@ package com.ohmonsea.financeplan;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.util.Base64;
 import android.util.Log;
 
@@ -41,22 +43,44 @@ public class NativeDownloadPlugin extends Plugin {
 
         try {
             byte[] bytes = Base64.decode(base64Data, Base64.DEFAULT);
+            Uri fileUri;
+            File legacyFile = null;
 
-            // Get Downloads directory
-            File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-            if (!downloadsDir.exists()) {
-                downloadsDir.mkdirs();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues contentValues = new ContentValues();
+                contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, filename);
+                contentValues.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+                contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+
+                fileUri = getContext().getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues);
+                
+                if (fileUri != null) {
+                    try (java.io.OutputStream os = getContext().getContentResolver().openOutputStream(fileUri)) {
+                        if (os != null) {
+                            os.write(bytes);
+                        }
+                    }
+                } else {
+                    throw new Exception("Failed to create MediaStore entry");
+                }
+            } else {
+                File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                if (!downloadsDir.exists()) {
+                    downloadsDir.mkdirs();
+                }
+
+                legacyFile = new File(downloadsDir, filename);
+                FileOutputStream fos = new FileOutputStream(legacyFile);
+                fos.write(bytes);
+                fos.close();
+                
+                fileUri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", legacyFile);
             }
 
-            File file = new File(downloadsDir, filename);
-            FileOutputStream fos = new FileOutputStream(file);
-            fos.write(bytes);
-            fos.close();
-
-            showNotification(filename, file, mimeType);
+            showNotification(filename, fileUri, mimeType);
 
             JSObject ret = new JSObject();
-            ret.put("path", file.getAbsolutePath());
+            ret.put("path", fileUri.toString());
             call.resolve(ret);
 
         } catch (Exception e) {
@@ -65,7 +89,7 @@ public class NativeDownloadPlugin extends Plugin {
         }
     }
 
-    private void showNotification(String filename, File file, String mimeType) {
+    private void showNotification(String filename, Uri fileUri, String mimeType) {
         Context context = getContext();
         NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
 
@@ -80,7 +104,6 @@ public class NativeDownloadPlugin extends Plugin {
 
         Intent intent = new Intent(Intent.ACTION_VIEW);
         
-        Uri fileUri = FileProvider.getUriForFile(context, context.getPackageName() + ".fileprovider", file);
         intent.setDataAndType(fileUri, mimeType);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
